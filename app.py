@@ -1,0 +1,650 @@
+import os
+import pickle
+import math
+import re
+import shutil
+import subprocess
+import pytesseract
+from PIL import Image, UnidentifiedImageError
+from pathlib import Path
+from flask import Flask, render_template, request
+from werkzeug.utils import secure_filename
+
+app = Flask(__name__)
+
+BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
+
+# Windows-safe folder creation
+try:
+    UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+except FileExistsError:
+    pass
+
+app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
+
+model      = pickle.load(open(str(BASE_DIR / 'model.pkl'),      'rb'))
+vectorizer = pickle.load(open(str(BASE_DIR / 'vectorizer.pkl'), 'rb'))
+
+UI_TEXT = {
+    "en": {
+        "real_news": "Real News",
+        "fake_news": "Fake News",
+        "confidence_score": "Confidence Score",
+        "reason_label": "Reason",
+        "image_type_label": "Detected Image Type",
+        "extracted_text_label": "Extracted Text from Image",
+        "invalid_image": "Please upload a valid image file.",
+        "ocr_failed": "OCR could not read this image. Please try a clearer image or paste the news text manually.",
+        "missing_input": "Please add news headlines or upload an image with readable text before analyzing.",
+    },
+    "hi": {
+        "real_news": "असली खबर",
+        "fake_news": "फर्जी खबर",
+        "confidence_score": "विश्वास स्कोर",
+        "reason_label": "कारण",
+        "image_type_label": "पहचाना गया इमेज प्रकार",
+        "extracted_text_label": "इमेज से निकाला गया टेक्स्ट",
+        "invalid_image": "कृपया सही इमेज फाइल अपलोड करें।",
+        "ocr_failed": "OCR इस इमेज को पढ़ नहीं पाया। कृपया साफ इमेज अपलोड करें या खबर का टेक्स्ट खुद लिखें।",
+        "missing_input": "कृपया विश्लेषण से पहले खबर का टेक्स्ट डालें या पढ़ने योग्य टेक्स्ट वाली इमेज अपलोड करें।",
+    },
+}
+
+IMAGE_TYPE_LABELS = {
+    "en": {
+        "WhatsApp Chat": "WhatsApp Chat",
+        "Twitter/X Post": "Twitter/X Post",
+        "News Screenshot": "News Screenshot",
+        "Generic Screenshot": "Generic Screenshot",
+    },
+    "hi": {
+        "WhatsApp Chat": "व्हाट्सऐप चैट",
+        "Twitter/X Post": "ट्विटर/X पोस्ट",
+        "News Screenshot": "न्यूज स्क्रीनशॉट",
+        "Generic Screenshot": "सामान्य स्क्रीनशॉट",
+    },
+}
+
+
+def normalize_language(language):
+    return "hi" if language == "hi" else "en"
+
+
+def get_ui_text(language):
+    return UI_TEXT[normalize_language(language)]
+
+
+def configure_tesseract():
+    candidates = [
+        os.environ.get("TESSERACT_CMD"),
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        shutil.which("tesseract"),
+    ]
+
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            pytesseract.pytesseract.tesseract_cmd = candidate
+            return True
+
+    return False
+
+
+TESSERACT_CONFIGURED = configure_tesseract()
+
+
+def run_windows_ocr(image_path):
+    powershell = shutil.which("powershell") or r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    if not Path(powershell).exists():
+        raise RuntimeError("Windows OCR is not available.")
+
+    script = r"""
+$path = $env:TRUTHLENS_OCR_IMAGE
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime] | Out-Null
+[Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType=WindowsRuntime] | Out-Null
+[Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime] | Out-Null
+
+function AwaitOperation($operation, $resultType) {
+    $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() |
+        Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 } |
+        Select-Object -First 1
+    $task = $asTask.MakeGenericMethod($resultType).Invoke($null, @($operation))
+    $task.Wait() | Out-Null
+    return $task.Result
+}
+
+$file = AwaitOperation ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+$stream = AwaitOperation ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+$decoder = AwaitOperation ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = AwaitOperation ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if ($null -eq $engine) {
+    throw "No Windows OCR language is available."
+}
+$result = AwaitOperation ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$result.Text
+"""
+
+    completed = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "TRUTHLENS_OCR_IMAGE": str(image_path)},
+        timeout=45,
+    )
+
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip() or "Windows OCR failed."
+        raise RuntimeError(message)
+
+    return completed.stdout.strip()
+
+
+def prepare_windows_ocr_image(image_path):
+    max_dimension = 2400
+
+    with Image.open(image_path) as image:
+        if max(image.size) <= max_dimension:
+            return image_path, None
+
+        resized = image.convert("RGB")
+        resized.thumbnail((max_dimension, max_dimension))
+        temp_path = UPLOAD_FOLDER / f"ocr_{Path(image_path).stem}.png"
+        resized.save(temp_path)
+        return temp_path, temp_path
+
+
+def extract_text_from_image(image_path):
+    try:
+        with Image.open(image_path) as uploaded:
+            if TESSERACT_CONFIGURED:
+                return pytesseract.image_to_string(uploaded).strip()
+    except UnidentifiedImageError:
+        raise
+    except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError):
+        pass
+
+    ocr_path, temp_path = prepare_windows_ocr_image(image_path)
+    try:
+        return run_windows_ocr(ocr_path).strip()
+    finally:
+        if temp_path and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+
+
+def render_index(**context):
+    selected_language = normalize_language(context.get("selected_language", "en"))
+    defaults = {
+        "prediction": None,
+        "display_prediction": None,
+        "result_class": None,
+        "confidence": None,
+        "reason": None,
+        "extracted_text": None,
+        "uploaded_image": None,
+        "image_type": None,
+        "error": None,
+        "show_result": False,
+        "clear_on_reload": False,
+        "selected_language": selected_language,
+        "ui": get_ui_text(selected_language),
+    }
+    defaults.update(context)
+    return render_template("index2.html", **defaults)
+
+
+def get_model_confidence(text_vector, prediction_raw):
+    if hasattr(model, "predict_proba"):
+        probabilities = model.predict_proba(text_vector)[0]
+        return round(float(max(probabilities)) * 100, 2)
+
+    if not hasattr(model, "decision_function"):
+        return None
+
+    scores = model.decision_function(text_vector)
+    first_score = scores[0]
+
+    if hasattr(first_score, "__len__"):
+        values = [float(value) for value in first_score]
+        max_score = max(values)
+        exp_scores = [math.exp(max(min(value - max_score, 60), -60)) for value in values]
+        return round((max(exp_scores) / sum(exp_scores)) * 100, 2)
+
+    score = max(min(float(first_score), 60), -60)
+    real_probability = 1 / (1 + math.exp(-score))
+    confidence = real_probability if int(prediction_raw) == 1 else 1 - real_probability
+    return round(confidence * 100, 2)
+
+
+def get_prediction_signals(text_vector, prediction_raw, limit=6):
+    if not hasattr(model, "coef_") or not hasattr(vectorizer, "get_feature_names_out"):
+        return []
+
+    try:
+        feature_names = vectorizer.get_feature_names_out()
+        coefficients = model.coef_
+
+        if coefficients.shape[0] == 1:
+            positive_class = model.classes_[-1] if hasattr(model, "classes_") else 1
+            direction = 1 if int(prediction_raw) == int(positive_class) else -1
+            weights = coefficients[0] * direction
+        else:
+            class_index = list(model.classes_).index(prediction_raw)
+            weights = coefficients[class_index]
+
+        row = text_vector.tocoo()
+        signals = []
+        for feature_index, value in zip(row.col, row.data):
+            score = float(value) * float(weights[feature_index])
+            if score > 0:
+                signals.append((feature_names[feature_index], score))
+
+        if signals:
+            signals.sort(key=lambda item: item[1], reverse=True)
+            return [term for term, _score in signals[:limit]]
+
+        fallback_terms = sorted(
+            ((feature_names[feature_index], float(value)) for feature_index, value in zip(row.col, row.data)),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        return [term for term, _value in fallback_terms[:limit]]
+    except Exception:
+        return []
+
+
+def get_text_terms(news_text, limit=4):
+    stop_terms = {
+        "about", "after", "also", "and", "are", "before", "from", "have",
+        "into", "that", "the", "their", "this", "with", "will", "your",
+        "किया", "लिए", "और", "यह", "है", "था", "की", "का", "के", "से",
+    }
+    terms = []
+    seen_terms = set()
+    for word in re.findall(r"\b[\w'-]+\b", news_text):
+        term = word.lower().strip("-'")
+        if len(term) < 4 or term in stop_terms or term in seen_terms:
+            continue
+        terms.append(term)
+        seen_terms.add(term)
+        if len(terms) == limit:
+            break
+    return terms
+
+
+def build_prediction_reason(news_text, text_vector, prediction_raw, language):
+    language = normalize_language(language)
+    signals = get_prediction_signals(text_vector, prediction_raw, limit=4) or get_text_terms(news_text)
+    signal_text = ", ".join(signals[:4])
+    text_lower = news_text.lower()
+    sensational_terms = [
+        "secret", "secretly", "shocking", "viral", "leaked", "conspiracy",
+        "expose", "elite", "miracle", "banned", "fake", "rumor",
+    ]
+    matched_terms = [term for term in sensational_terms if term in text_lower]
+
+    if int(prediction_raw) == 1:
+        if language == "hi":
+            if signal_text:
+                return f"मॉडल ने इसे असली खबर माना क्योंकि इसका लेखन औपचारिक समाचार जैसा है और मुख्य संकेत शब्द ({signal_text}) भरोसेमंद खबरों के पैटर्न से मेल खाते हैं।"
+            return "मॉडल ने इसे असली खबर माना क्योंकि इसकी भाषा सामान्य, औपचारिक और भरोसेमंद समाचार लेखन जैसी दिखती है।"
+
+        if signal_text:
+            return f"The model marked this as Real News because its wording looks closer to formal reporting, and key terms like {signal_text} match patterns seen in reliable news articles."
+        return "The model marked this as Real News because the writing style looks more formal and closer to reliable news articles."
+
+    if language == "hi":
+        if matched_terms:
+            return f"मॉडल ने इसे फर्जी खबर माना क्योंकि इसमें संदिग्ध या सनसनीखेज शब्द मिले ({', '.join(matched_terms[:4])}), और इसकी भाषा भ्रामक खबरों के पैटर्न से मेल खाती है।"
+        if signal_text:
+            return f"मॉडल ने इसे फर्जी खबर माना क्योंकि मुख्य संकेत शब्द ({signal_text}) फेक या भ्रामक खबरों में मिलने वाले पैटर्न से मेल खाते हैं।"
+        return "मॉडल ने इसे फर्जी खबर माना क्योंकि इसकी भाषा फेक या भ्रामक खबरों के पैटर्न जैसी दिखती है।"
+
+    if matched_terms:
+        return f"The model marked this as Fake News because it found suspicious or sensational wording such as {', '.join(matched_terms[:4])}, and the text pattern is closer to misleading news articles."
+    if signal_text:
+        return f"The model marked this as Fake News because key terms like {signal_text} match patterns commonly found in fake or misleading news articles."
+    return "The model marked this as Fake News because the writing pattern is closer to fake or misleading news articles."
+
+
+def localize_image_type(platform, language):
+    language = normalize_language(language)
+    return IMAGE_TYPE_LABELS[language].get(platform, platform)
+
+
+def build_analysis(news_text, typed_text, extracted_text, uploaded_image, text_vector, prediction_raw, confidence):
+    words = re.findall(r"\b[\w'-]+\b", news_text)
+    word_count = len(words)
+    char_count = len(news_text)
+    stop_terms = {
+        "about", "after", "also", "and", "are", "before", "from", "have",
+        "into", "that", "the", "their", "this", "with", "will", "your",
+    }
+    signals = get_prediction_signals(text_vector, prediction_raw)
+
+    if not signals:
+        seen_terms = set()
+        for word in words:
+            term = word.lower().strip("-'")
+            if len(term) < 4 or term in stop_terms or term in seen_terms:
+                continue
+            signals.append(term)
+            seen_terms.add(term)
+            if len(signals) == 6:
+                break
+
+    if typed_text and uploaded_image:
+        source = "Text + Image OCR"
+    elif uploaded_image:
+        source = "Image OCR"
+    else:
+        source = "Typed Text"
+
+    if confidence is None:
+        confidence_label = "Unavailable"
+    elif confidence >= 85:
+        confidence_label = "High"
+    elif confidence >= 65:
+        confidence_label = "Moderate"
+    else:
+        confidence_label = "Low"
+
+    notes = []
+    if uploaded_image:
+        notes.append("OCR text extracted from the uploaded image.")
+    if word_count < 30:
+        notes.append("Short inputs can produce less stable predictions.")
+    if confidence is not None and confidence < 65:
+        notes.append("Prediction confidence is low, so manual review is recommended.")
+    if not notes:
+        notes.append("Input length and model confidence look suitable for this analysis.")
+
+    return {
+        "source": source,
+        "word_count": word_count,
+        "char_count": char_count,
+        "reading_time": "Less than 1 min" if word_count < 220 else f"{math.ceil(word_count / 220)} min",
+        "confidence_label": confidence_label,
+        "signals": signals,
+        "notes": notes,
+    }
+
+
+def has_date_or_time(text):
+    patterns = [
+        r"\b\d{1,2}:\d{2}\b",
+        r"\b\d{1,2}\s?(am|pm)\b",
+        r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b",
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+        r"\b(today|yesterday|minutes ago|hours ago|updated)\b",
+    ]
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def has_url_or_source(text):
+    return bool(re.search(r"\b(https?://|www\.|\.com|\.in|\.org|\.net|source:|via\s+)\b", text, re.IGNORECASE))
+
+
+def get_image_forensics(image_path):
+    with Image.open(image_path) as image:
+        width, height = image.size
+        image_format = image.format or Path(image_path).suffix.lstrip(".").upper() or "Unknown"
+        megapixels = round((width * height) / 1_000_000, 2)
+        aspect_ratio = round(width / height, 2) if height else 0
+        metadata_present = bool(image.getexif())
+
+        sample = image.convert("RGB").resize((80, 80))
+        pixels = list(sample.getdata())
+        total = len(pixels) or 1
+        green_pixels = sum(1 for r, g, b in pixels if g > 115 and g - r > 25 and g - b > 15)
+        blue_pixels = sum(1 for r, g, b in pixels if b > 120 and b - r > 25 and b - g > 5)
+        dark_pixels = sum(1 for r, g, b in pixels if r < 70 and g < 70 and b < 70)
+        light_pixels = sum(1 for r, g, b in pixels if r > 210 and g > 210 and b > 210)
+
+    return {
+        "width": width,
+        "height": height,
+        "format": image_format,
+        "megapixels": megapixels,
+        "aspect_ratio": aspect_ratio,
+        "metadata_present": metadata_present,
+        "green_percent": round((green_pixels / total) * 100, 1),
+        "blue_percent": round((blue_pixels / total) * 100, 1),
+        "dark_percent": round((dark_pixels / total) * 100, 1),
+        "light_percent": round((light_pixels / total) * 100, 1),
+    }
+
+
+def detect_screenshot_platform(text, image_info):
+    text_lower = text.lower()
+    scores = {
+        "WhatsApp Chat": 0,
+        "Twitter/X Post": 0,
+        "News Screenshot": 0,
+    }
+
+    whatsapp_terms = ["whatsapp", "online", "typing", "forwarded", "end-to-end", "message", "voice message"]
+    twitter_terms = ["twitter", "tweet", "retweeted", "reposted", "reply", "quote", "followers", "following", "views", "likes", "@"]
+    news_terms = ["breaking", "exclusive", "news", "reported", "headline", "subscribe", "advertisement", "updated", "source", "live"]
+
+    scores["WhatsApp Chat"] += sum(2 for term in whatsapp_terms if term in text_lower)
+    scores["Twitter/X Post"] += sum(2 for term in twitter_terms if term in text_lower)
+    scores["News Screenshot"] += sum(2 for term in news_terms if term in text_lower)
+
+    if image_info["green_percent"] > 4:
+        scores["WhatsApp Chat"] += 2
+    if image_info["blue_percent"] > 3:
+        scores["Twitter/X Post"] += 1
+    if image_info["aspect_ratio"] < 0.75:
+        scores["WhatsApp Chat"] += 1
+        scores["Twitter/X Post"] += 1
+    if has_url_or_source(text):
+        scores["News Screenshot"] += 2
+
+    platform, score = max(scores.items(), key=lambda item: item[1])
+    if score < 2:
+        return "Generic Screenshot", scores
+
+    return platform, scores
+
+
+def analyze_screenshot_forensics(image_path, extracted_text):
+    text = extracted_text or ""
+    text_lower = text.lower()
+    image_info = get_image_forensics(image_path)
+    platform, platform_scores = detect_screenshot_platform(text, image_info)
+    words = re.findall(r"\b[\w'-]+\b", text)
+
+    risk_score = 18
+    checks = []
+    red_flags = []
+
+    if platform == "Generic Screenshot":
+        risk_score += 16
+        red_flags.append("Platform layout could not be confidently identified.")
+    else:
+        checks.append(f"Detected layout: {platform}.")
+
+    if len(words) < 8:
+        risk_score += 18
+        red_flags.append("Very little readable text was found in the screenshot.")
+    else:
+        checks.append(f"OCR captured {len(words)} readable words.")
+
+    if image_info["megapixels"] < 0.3:
+        risk_score += 14
+        red_flags.append("Low image resolution can hide editing artifacts.")
+    else:
+        checks.append(f"Image quality is {image_info['width']}x{image_info['height']} ({image_info['megapixels']} MP).")
+
+    if not image_info["metadata_present"]:
+        risk_score += 6
+        checks.append("No embedded camera/app metadata found; this is common for screenshots but weakens provenance.")
+    else:
+        checks.append("Embedded metadata is present.")
+
+    sensational_terms = [
+        "secret", "expose", "shocking", "viral", "leaked", "conspiracy",
+        "elite", "miracle", "banned", "before he died", "you won't believe",
+    ]
+    matched_terms = [term for term in sensational_terms if term in text_lower]
+    if matched_terms:
+        risk_score += min(len(matched_terms) * 7, 24)
+        red_flags.append("Sensational wording detected: " + ", ".join(matched_terms[:4]) + ".")
+
+    if platform == "WhatsApp Chat":
+        if "forwarded" in text_lower:
+            risk_score += 8
+            red_flags.append("Forwarded-message language often appears in viral misinformation.")
+        if not has_date_or_time(text):
+            risk_score += 8
+            red_flags.append("No clear chat timestamp was detected.")
+        if not has_url_or_source(text):
+            risk_score += 8
+            red_flags.append("No verifiable source link appears in the chat text.")
+    elif platform == "Twitter/X Post":
+        if "@" not in text:
+            risk_score += 12
+            red_flags.append("No visible @ handle was detected.")
+        if not has_date_or_time(text):
+            risk_score += 8
+            red_flags.append("No visible post date or time was detected.")
+        if not re.search(r"\b(like|likes|view|views|reply|repost|retweeted)\b", text_lower):
+            risk_score += 6
+            red_flags.append("Normal post engagement labels were not detected.")
+    elif platform == "News Screenshot":
+        if not has_url_or_source(text):
+            risk_score += 12
+            red_flags.append("No visible publisher URL or source marker was detected.")
+        if not has_date_or_time(text):
+            risk_score += 8
+            red_flags.append("No visible publish date or update time was detected.")
+        if "breaking" in text_lower and len(words) < 16:
+            risk_score += 8
+            red_flags.append("Short breaking-news claims need external verification.")
+
+    risk_score = max(0, min(100, risk_score))
+    if risk_score >= 70:
+        risk_level = "High Risk"
+        risk_class = "high"
+    elif risk_score >= 45:
+        risk_level = "Medium Risk"
+        risk_class = "medium"
+    else:
+        risk_level = "Low Risk"
+        risk_class = "low"
+
+    if not red_flags:
+        red_flags.append("No major screenshot-specific warning signs were detected.")
+
+    return {
+        "platform": platform,
+        "risk_level": risk_level,
+        "risk_class": risk_class,
+        "risk_score": risk_score,
+        "checks": checks[:4],
+        "red_flags": red_flags[:5],
+        "image_info": image_info,
+        "platform_scores": platform_scores,
+    }
+
+
+@app.route('/')
+def home():
+    return render_index()
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    selected_language = normalize_language(request.form.get("language", "en"))
+    ui = get_ui_text(selected_language)
+    typed_text = request.form.get("news", "").strip()
+    news_text = typed_text
+    extracted_text = ""
+    uploaded_image = None
+    image_type = None
+
+    image = request.files.get("image")
+
+    if image and image.filename != "":
+        filename = secure_filename(image.filename)
+        if filename == "":
+            return render_index(error=ui["invalid_image"], selected_language=selected_language)
+
+        image_path = UPLOAD_FOLDER / filename
+        image.save(image_path)
+        uploaded_image = f"uploads/{filename}"
+
+        try:
+            extracted_text = extract_text_from_image(image_path)
+            image_info = get_image_forensics(image_path)
+            platform, _platform_scores = detect_screenshot_platform(extracted_text, image_info)
+            image_type = localize_image_type(platform, selected_language)
+        except UnidentifiedImageError:
+            return render_index(
+                error=ui["invalid_image"],
+                uploaded_image=uploaded_image,
+                selected_language=selected_language
+            )
+        except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, RuntimeError, subprocess.SubprocessError):
+            return render_index(
+                error=ui["ocr_failed"],
+                uploaded_image=uploaded_image,
+                selected_language=selected_language
+            )
+
+        news_text = f"{news_text} {extracted_text}".strip()
+
+    if news_text.strip() == "":
+        return render_index(
+            error=ui["missing_input"],
+            uploaded_image=uploaded_image,
+            selected_language=selected_language
+        )
+
+    text_vector = vectorizer.transform([news_text])
+    prediction_raw = model.predict(text_vector)[0]
+    confidence = get_model_confidence(text_vector, prediction_raw)
+
+    if prediction_raw == 1:
+        prediction = "Real News"
+        display_prediction = ui["real_news"]
+        result_class = "real"
+    else:
+        prediction = "Fake News"
+        display_prediction = ui["fake_news"]
+        result_class = "fake"
+
+    reason = build_prediction_reason(news_text, text_vector, prediction_raw, selected_language)
+
+    return render_template(
+        "index2.html",
+        prediction=prediction,
+        display_prediction=display_prediction,
+        result_class=result_class,
+        confidence=confidence,
+        reason=reason,
+        extracted_text=extracted_text,
+        uploaded_image=uploaded_image,
+        image_type=image_type,
+        selected_language=selected_language,
+        ui=ui,
+        show_result=True,
+        clear_on_reload=True
+    )
+
+if __name__ == '__main__':
+    app.run(debug=True)
