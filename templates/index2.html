@@ -1037,7 +1037,31 @@
       scrollbar-width: thin;
     }
 
+    .recent-row {
+      display: flex;
+      align-items: center;
+      gap: 0.2rem;
+      border-radius: 9px;
+      transition: background var(--speed);
+    }
+
+    .recent-row:hover,
+    .recent-row.active {
+      background: var(--faint);
+    }
+
+    .recent-row.active .recent-item {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .recent-row:hover .recent-item {
+      color: var(--text);
+    }
+
     .recent-item {
+      flex: 1;
+      min-width: 0;
       width: 100%;
       overflow: hidden;
       padding: 0.58rem 0.7rem;
@@ -1052,20 +1076,32 @@
       transition: background var(--speed), color var(--speed), border-color var(--speed);
     }
 
-    .recent-item:hover {
-      background: var(--faint);
-      color: var(--text);
-    }
-
-    .recent-item.active {
-      background: var(--faint);
-      color: var(--text);
-      font-weight: 600;
-    }
-
     .recent-item.empty {
       cursor: default;
       opacity: 0.55;
+    }
+
+    .delete-recent-btn {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 28px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1;
+      opacity: 0.72;
+      transition: background var(--speed), color var(--speed), opacity var(--speed);
+    }
+
+    .delete-recent-btn:hover {
+      background: var(--red-soft);
+      color: var(--red);
+      opacity: 1;
     }
 
     .image-viewer {
@@ -1693,13 +1729,27 @@
         }
 
         recents.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = item.id === activeRecentId ? "recent-row active" : "recent-row";
+
           const button = document.createElement("button");
           button.type = "button";
-          button.className = item.id === activeRecentId ? "recent-item active" : "recent-item";
+          button.className = "recent-item";
           button.textContent = item.title;
           button.title = item.title;
           button.addEventListener("click", () => loadRecentAnalysis(item.id));
-          elements.recentsList.appendChild(button);
+
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "delete-recent-btn";
+          deleteButton.textContent = "\u00d7";
+          deleteButton.title = "Delete recent";
+          deleteButton.setAttribute("aria-label", `Delete ${item.title}`);
+          deleteButton.addEventListener("click", () => deleteRecentAnalysis(item.id));
+
+          row.appendChild(button);
+          row.appendChild(deleteButton);
+          elements.recentsList.appendChild(row);
         });
       }
 
@@ -1734,6 +1784,18 @@
         updateCount(document.getElementById("newsText"));
         clearImagePreview();
         renderAnalysisResponse(item.data);
+        renderRecents();
+      }
+
+      function deleteRecentAnalysis(id) {
+        const recents = getRecents().filter((recent) => recent.id !== id);
+        setRecents(recents);
+
+        if (activeRecentId === id) {
+          clearAll();
+          return;
+        }
+
         renderRecents();
       }
 
