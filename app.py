@@ -3,19 +3,23 @@ import pickle
 import math
 import re
 import shutil
+import sqlite3
 import subprocess
 import uuid
 import pytesseract
+from datetime import datetime
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pathlib import Path
-from flask import Flask, jsonify, render_template, request, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
+DATABASE_PATH = Path(os.environ.get("TRUTHLENS_DB_PATH", BASE_DIR / "truthlens.db"))
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "8"))
 ENABLE_SLOW_OCR_FALLBACK = os.environ.get("ENABLE_SLOW_OCR_FALLBACK") == "1"
@@ -28,6 +32,53 @@ except FileExistsError:
 
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "truthlens-dev-secret-key")
+
+
+def get_db_connection():
+    connection = sqlite3.connect(DATABASE_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def init_database():
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with get_db_connection() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                news_text TEXT,
+                prediction TEXT NOT NULL,
+                display_prediction TEXT NOT NULL,
+                result_class TEXT NOT NULL,
+                confidence REAL,
+                reason TEXT,
+                extracted_text TEXT,
+                uploaded_image TEXT,
+                image_type TEXT,
+                language TEXT NOT NULL DEFAULT 'en',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+
+def now_string():
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+init_database()
 
 model      = pickle.load(open(str(BASE_DIR / 'model.pkl'),      'rb'))
 vectorizer = pickle.load(open(str(BASE_DIR / 'vectorizer.pkl'), 'rb'))
@@ -81,6 +132,149 @@ def normalize_language(language):
 
 def get_ui_text(language):
     return UI_TEXT[normalize_language(language)]
+
+
+def get_current_user():
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+
+    with get_db_connection() as connection:
+        user = connection.execute(
+            "SELECT id, name, email, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+
+    if not user:
+        session.pop("user_id", None)
+        return None
+
+    return dict(user)
+
+
+def make_analysis_title(news_text, extracted_text, uploaded_image):
+    source = news_text or extracted_text or uploaded_image or "TruthLens analysis"
+    compact = re.sub(r"\s+", " ", source).strip()
+    return f"{compact[:67]}..." if len(compact) > 70 else compact
+
+
+def serialize_analysis_row(row):
+    selected_language = normalize_language(row["language"])
+    ui = get_ui_text(selected_language)
+    uploaded_image = row["uploaded_image"]
+    analysis_id = row["id"]
+
+    data = {
+        "analysis_id": analysis_id,
+        "prediction": row["prediction"],
+        "display_prediction": row["display_prediction"],
+        "result_class": row["result_class"],
+        "confidence": row["confidence"],
+        "reason": row["reason"],
+        "extracted_text": row["extracted_text"],
+        "uploaded_image": uploaded_image,
+        "uploaded_image_url": url_for("static", filename=uploaded_image) if uploaded_image else None,
+        "image_type": row["image_type"],
+        "selected_language": selected_language,
+        "show_result": True,
+        "report_url": url_for("download_report", analysis_id=analysis_id),
+        "ui": {
+            "confidence_score": ui["confidence_score"],
+            "reason_label": ui["reason_label"],
+            "image_type_label": ui["image_type_label"],
+            "extracted_text_label": ui["extracted_text_label"],
+        },
+    }
+
+    return {
+        "id": f"saved-{analysis_id}",
+        "serverId": analysis_id,
+        "title": row["title"],
+        "newsText": row["news_text"] or "",
+        "createdAt": row["created_at"],
+        "data": data,
+    }
+
+
+def get_user_analyses(user_id, limit=8):
+    if not user_id:
+        return []
+
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM analyses
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+
+    return [serialize_analysis_row(row) for row in rows]
+
+
+def get_dashboard_stats(user_id):
+    with get_db_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN result_class = 'real' THEN 1 ELSE 0 END) AS real_count,
+                SUM(CASE WHEN result_class = 'fake' THEN 1 ELSE 0 END) AS fake_count
+            FROM analyses
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+
+    total = row["total"] or 0
+    return {
+        "total": total,
+        "real": row["real_count"] or 0,
+        "fake": row["fake_count"] or 0,
+    }
+
+
+def save_analysis_for_current_user(**analysis):
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+
+    title = make_analysis_title(
+        analysis.get("typed_text") or analysis.get("news_text"),
+        analysis.get("extracted_text"),
+        analysis.get("uploaded_image"),
+    )
+
+    with get_db_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO analyses (
+                user_id, title, news_text, prediction, display_prediction,
+                result_class, confidence, reason, extracted_text, uploaded_image,
+                image_type, language, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                title,
+                analysis.get("news_text", ""),
+                analysis["prediction"],
+                analysis["display_prediction"],
+                analysis["result_class"],
+                analysis.get("confidence"),
+                analysis.get("reason"),
+                analysis.get("extracted_text"),
+                analysis.get("uploaded_image"),
+                analysis.get("image_type"),
+                normalize_language(analysis.get("selected_language")),
+                now_string(),
+            ),
+        )
+        return cursor.lastrowid
 
 
 def configure_tesseract():
@@ -329,6 +523,7 @@ def handle_unexpected_error(error):
 
 def build_template_context(**context):
     selected_language = normalize_language(context.get("selected_language", "en"))
+    current_user = get_current_user()
     defaults = {
         "prediction": None,
         "display_prediction": None,
@@ -340,9 +535,16 @@ def build_template_context(**context):
         "image_type": None,
         "error": None,
         "show_result": False,
+        "show_dashboard": False,
         "clear_on_reload": False,
+        "analysis_id": None,
+        "report_url": None,
         "selected_language": selected_language,
         "ui": get_ui_text(selected_language),
+        "current_user": current_user,
+        "saved_recents": get_user_analyses(current_user["id"], limit=6) if current_user else [],
+        "dashboard_stats": None,
+        "dashboard_items": [],
     }
     defaults.update(context)
     defaults["selected_language"] = selected_language
@@ -377,6 +579,8 @@ def build_json_response(**context):
         "uploaded_image": uploaded_image,
         "uploaded_image_url": url_for("static", filename=uploaded_image) if uploaded_image else None,
         "image_type": data.get("image_type"),
+        "analysis_id": data.get("analysis_id"),
+        "report_url": data.get("report_url"),
         "selected_language": data.get("selected_language"),
         "show_result": data.get("show_result"),
         "ui": {
@@ -393,6 +597,156 @@ def respond_index(**context):
         return build_json_response(**context)
 
     return render_index(**context)
+
+
+def auth_error(message, status=400):
+    if wants_json_response():
+        return jsonify({"ok": False, "error": message}), status
+
+    return render_index(error=message), status
+
+
+@app.route("/signup", methods=["POST"])
+def signup():
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    if not name or not email or not password:
+        return auth_error("Please enter your name, email, and password.")
+
+    if len(password) < 6:
+        return auth_error("Password must be at least 6 characters.")
+
+    try:
+        with get_db_connection() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO users (name, email, password_hash, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, email, generate_password_hash(password), now_string()),
+            )
+            session["user_id"] = cursor.lastrowid
+    except sqlite3.IntegrityError:
+        return auth_error("An account with this email already exists.")
+
+    if wants_json_response():
+        return jsonify({"ok": True, "message": "Account created successfully."})
+
+    return redirect(url_for("home"))
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    with get_db_connection() as connection:
+        user = connection.execute(
+            "SELECT id, password_hash FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+
+    if not user or not check_password_hash(user["password_hash"], password):
+        return auth_error("Invalid email or password.")
+
+    session["user_id"] = user["id"]
+
+    if wants_json_response():
+        return jsonify({"ok": True, "message": "Logged in successfully."})
+
+    return redirect(url_for("home"))
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.pop("user_id", None)
+
+    if wants_json_response():
+        return jsonify({"ok": True})
+
+    return redirect(url_for("home"))
+
+
+@app.route("/dashboard")
+def dashboard():
+    current_user = get_current_user()
+    if not current_user:
+        return redirect(url_for("home"))
+
+    return render_index(
+        show_dashboard=True,
+        dashboard_stats=get_dashboard_stats(current_user["id"]),
+        dashboard_items=get_user_analyses(current_user["id"], limit=30),
+    )
+
+
+@app.route("/history/<int:analysis_id>/delete", methods=["POST"])
+def delete_analysis(analysis_id):
+    current_user = get_current_user()
+    if not current_user:
+        if wants_json_response():
+            return jsonify({"ok": False, "error": "Login required."}), 401
+
+        return redirect(url_for("home"))
+
+    with get_db_connection() as connection:
+        connection.execute(
+            "DELETE FROM analyses WHERE id = ? AND user_id = ?",
+            (analysis_id, current_user["id"]),
+        )
+
+    if wants_json_response():
+        return jsonify({"ok": True})
+
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/report/<int:analysis_id>")
+def download_report(analysis_id):
+    current_user = get_current_user()
+    if not current_user:
+        return redirect(url_for("home"))
+
+    with get_db_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM analyses
+            WHERE id = ? AND user_id = ?
+            """,
+            (analysis_id, current_user["id"]),
+        ).fetchone()
+
+    if not row:
+        return Response("Report not found.", status=404, mimetype="text/plain")
+
+    report = f"""TruthLens AI Analysis Report
+
+Generated: {row['created_at']}
+User: {current_user['name']} <{current_user['email']}>
+
+Verdict: {row['display_prediction']}
+Confidence: {row['confidence'] if row['confidence'] is not None else 'N/A'}%
+Detected Image Type: {row['image_type'] or 'Text input'}
+
+Reason:
+{row['reason'] or 'No reason available.'}
+
+Submitted Text:
+{row['news_text'] or 'No typed text submitted.'}
+
+Extracted Image Text:
+{row['extracted_text'] or 'No extracted image text.'}
+"""
+
+    filename = f"truthlens-report-{analysis_id}.txt"
+    return Response(
+        report,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 def get_model_confidence(text_vector, prediction_raw):
@@ -834,6 +1188,20 @@ def predict():
         result_class = "fake"
 
     reason = build_prediction_reason(news_text, text_vector, prediction_raw, selected_language)
+    analysis_id = save_analysis_for_current_user(
+        news_text=news_text,
+        typed_text=typed_text,
+        prediction=prediction,
+        display_prediction=display_prediction,
+        result_class=result_class,
+        confidence=confidence,
+        reason=reason,
+        extracted_text=extracted_text,
+        uploaded_image=uploaded_image,
+        image_type=image_type,
+        selected_language=selected_language,
+    )
+    report_url = url_for("download_report", analysis_id=analysis_id) if analysis_id else None
 
     return respond_index(
         prediction=prediction,
@@ -844,6 +1212,8 @@ def predict():
         extracted_text=extracted_text,
         uploaded_image=uploaded_image,
         image_type=image_type,
+        analysis_id=analysis_id,
+        report_url=report_url,
         selected_language=selected_language,
         ui=ui,
         show_result=True,
@@ -851,4 +1221,4 @@ def predict():
     )
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000,debug=True)

@@ -968,6 +968,34 @@
       line-height: 1.7;
     }
 
+    .result-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 1.1rem;
+    }
+
+    .report-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 0.55rem 0.85rem;
+      border: 1px solid var(--accent-glow);
+      border-radius: 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .report-btn.secondary {
+      border-color: rgba(128, 128, 128, 0.18);
+      background: rgba(128, 128, 128, 0.08);
+      color: var(--text);
+    }
+
     /* Sidebar history */
     .history-panel {
       position: fixed;
@@ -991,6 +1019,62 @@
       align-items: stretch;
       gap: 0.75rem;
       min-height: 0;
+    }
+
+    .auth-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+
+    .auth-kicker {
+      color: var(--placeholder);
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .auth-user {
+      color: var(--text);
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    .auth-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .auth-chip,
+    .dashboard-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0.45rem 0.62rem;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: transparent;
+      color: var(--text);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .auth-chip.primary {
+      border-color: var(--accent-glow);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .dashboard-link {
+      width: 100%;
     }
 
     .history-label {
@@ -1186,6 +1270,197 @@
       line-height: 1;
     }
 
+    .auth-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      background: rgba(0, 0, 0, 0.62);
+    }
+
+    .auth-modal.show {
+      display: flex;
+    }
+
+    .auth-card {
+      width: min(100%, 390px);
+      padding: 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .auth-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .auth-card h2,
+    .dashboard-view h2 {
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+    }
+
+    .auth-close {
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text);
+      font-size: 1.1rem;
+    }
+
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+      margin-bottom: 1rem;
+    }
+
+    .auth-tabs button {
+      min-height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .auth-tabs button.active {
+      border-color: var(--accent-glow);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .auth-form {
+      display: none;
+      gap: 0.7rem;
+    }
+
+    .auth-form.active {
+      display: grid;
+    }
+
+    .auth-form input {
+      width: 100%;
+      min-height: 44px;
+      padding: 0 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--input-bg);
+      color: var(--text);
+      font: inherit;
+    }
+
+    .auth-form button {
+      min-height: 44px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--button-bg);
+      color: var(--button-text);
+      font-weight: 800;
+    }
+
+    .auth-message {
+      min-height: 1.2rem;
+      margin-top: 0.75rem;
+      color: var(--red);
+      font-size: 0.78rem;
+    }
+
+    .dashboard-view {
+      width: min(100%, 780px);
+      animation: fadeUp 0.45s ease both;
+    }
+
+    .dashboard-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .dashboard-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .stat-card,
+    .dashboard-item {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .stat-card {
+      padding: 1rem;
+    }
+
+    .stat-card span {
+      color: var(--muted);
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .stat-card strong {
+      display: block;
+      margin-top: 0.35rem;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+    }
+
+    .dashboard-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .dashboard-item {
+      padding: 1rem;
+    }
+
+    .dashboard-item-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.55rem;
+    }
+
+    .dashboard-title {
+      color: var(--text);
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    .dashboard-meta {
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+
+    .dashboard-empty {
+      padding: 1.2rem;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      color: var(--muted);
+      text-align: center;
+    }
+
     /* Examples */
     .examples {
       position: relative;
@@ -1304,6 +1579,16 @@
         padding: 1.5rem 0.75rem 3rem;
       }
 
+      .dashboard-head,
+      .dashboard-item-top {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .dashboard-stats {
+        grid-template-columns: 1fr;
+      }
+
       .card-body,
       .card-footer {
         padding-right: 1.2rem;
@@ -1338,6 +1623,24 @@
 
   <aside class="history-panel" aria-label="Recent analyses">
     <div class="history-top">
+      <div class="auth-panel">
+        {% if current_user %}
+        <span class="auth-kicker">Signed in</span>
+        <span class="auth-user">{{ current_user.name }}</span>
+        <a class="dashboard-link" href="{{ url_for('dashboard') }}">Personal Dashboard</a>
+        <form action="{{ url_for('logout') }}" method="POST">
+          <button type="submit" class="auth-chip">Log out</button>
+        </form>
+        {% else %}
+        <span class="auth-kicker">Guest mode</span>
+        <div class="auth-actions">
+          <button type="button" class="auth-chip primary" onclick="continueAsGuest()">Continue as Guest</button>
+          <button type="button" class="auth-chip" onclick="openAuthModal('login')">Login</button>
+          <button type="button" class="auth-chip" onclick="openAuthModal('signup')">Sign Up</button>
+        </div>
+        {% endif %}
+      </div>
+
       <button type="button" class="new-chat-btn" onclick="startNewChat()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 5v14"></path>
@@ -1372,6 +1675,53 @@
     </div>
   </header>
 
+  {% if show_dashboard %}
+  <main>
+    <section class="dashboard-view" aria-label="Personal dashboard">
+      <div class="dashboard-head">
+        <div>
+          <p class="hero-eyebrow">Saved History</p>
+          <h2>Personal Dashboard</h2>
+        </div>
+        <a class="report-btn" href="{{ url_for('home') }}">New Analysis</a>
+      </div>
+
+      <div class="dashboard-stats">
+        <div class="stat-card">
+          <span>Total</span>
+          <strong>{{ dashboard_stats.total if dashboard_stats else 0 }}</strong>
+        </div>
+        <div class="stat-card">
+          <span>Real</span>
+          <strong>{{ dashboard_stats.real if dashboard_stats else 0 }}</strong>
+        </div>
+        <div class="stat-card">
+          <span>Fake</span>
+          <strong>{{ dashboard_stats.fake if dashboard_stats else 0 }}</strong>
+        </div>
+      </div>
+
+      <div class="dashboard-list">
+        {% if dashboard_items %}
+          {% for item in dashboard_items %}
+          <article class="dashboard-item">
+            <div class="dashboard-item-top">
+              <div>
+                <div class="dashboard-title">{{ item.title }}</div>
+                <div class="dashboard-meta">{{ item.createdAt }} &middot; {{ item.data.display_prediction }}</div>
+              </div>
+              <a class="report-btn secondary" href="{{ item.data.report_url }}">Download Report</a>
+            </div>
+            <p class="dashboard-meta">{{ item.data.reason }}</p>
+          </article>
+          {% endfor %}
+        {% else %}
+          <div class="dashboard-empty">No saved analyses yet. Run an analysis while logged in to build your history.</div>
+        {% endif %}
+      </div>
+    </section>
+  </main>
+  {% else %}
   <main>
     <section class="hero" aria-labelledby="heroTitle">
       <p class="hero-eyebrow">Multimodal Fact Checker</p>
@@ -1526,6 +1876,14 @@
             <p class="extracted-text">{{ extracted_text }}</p>
           </div>
           {% endif %}
+
+          <div class="result-actions">
+            {% if report_url %}
+            <a class="report-btn" href="{{ report_url }}">Download Report</a>
+            {% elif not current_user %}
+            <button type="button" class="report-btn secondary" onclick="openAuthModal('login')">Login to save &amp; download</button>
+            {% endif %}
+          </div>
         </div>
       </section>
       {% endif %}
@@ -1542,6 +1900,7 @@
       </div>
     </section>
   </main>
+  {% endif %}
 
   <footer>
     TruthLens AI &nbsp;&middot;&nbsp; For research and educational use only &nbsp;&middot;&nbsp; Always verify with trusted sources
@@ -1551,6 +1910,37 @@
     <button type="button" class="image-viewer-close" aria-label="Close image preview" onclick="closeImageViewer()">&times;</button>
     <img id="imageViewerImg" src="" alt="Uploaded image full preview" onclick="event.stopPropagation()" />
   </div>
+
+  {% if not current_user %}
+  <div class="auth-modal" id="authModal" role="dialog" aria-modal="true" aria-label="Account access" onclick="closeAuthModal()">
+    <div class="auth-card" onclick="event.stopPropagation()">
+      <div class="auth-card-head">
+        <h2 id="authTitle">Login</h2>
+        <button type="button" class="auth-close" aria-label="Close login dialog" onclick="closeAuthModal()">&times;</button>
+      </div>
+
+      <div class="auth-tabs" aria-label="Account options">
+        <button type="button" id="loginTab" class="active" onclick="switchAuthMode('login')">Login</button>
+        <button type="button" id="signupTab" onclick="switchAuthMode('signup')">Sign Up</button>
+      </div>
+
+      <form class="auth-form active" id="loginForm" action="{{ url_for('login') }}" method="POST">
+        <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required />
+        <button type="submit">Login</button>
+      </form>
+
+      <form class="auth-form" id="signupForm" action="{{ url_for('signup') }}" method="POST">
+        <input type="text" name="name" placeholder="Name" autocomplete="name" required />
+        <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+        <input type="password" name="password" placeholder="Password" autocomplete="new-password" minlength="6" required />
+        <button type="submit">Create Account</button>
+      </form>
+
+      <div class="auth-message" id="authMessage"></div>
+    </div>
+  </div>
+  {% endif %}
 
   <script>
     (() => {
@@ -1577,13 +1967,23 @@
         stopButton: document.getElementById("stopCameraBtn"),
         submitButton: document.getElementById("submitBtn"),
         uploadZone: document.getElementById("uploadZone"),
+        authModal: document.getElementById("authModal"),
+        authMessage: document.getElementById("authMessage"),
+        authTitle: document.getElementById("authTitle"),
+        loginForm: document.getElementById("loginForm"),
+        signupForm: document.getElementById("signupForm"),
+        loginTab: document.getElementById("loginTab"),
+        signupTab: document.getElementById("signupTab"),
       };
 
+      const IS_AUTHENTICATED = {{ 'true' if current_user else 'false' }};
+      const SERVER_RECENTS = {{ saved_recents|tojson }};
       let cameraStream = null;
       let activeRecentId = null;
       let swipeStartX = 0;
       let swipeStartY = 0;
       let swipeTracking = false;
+      let didHydrateServerRecents = false;
       const ANALYSIS_TIMEOUT_MS = 30000;
       const IMAGE_RESIZE_TIMEOUT_MS = 10000;
       const HISTORY_KEY = "tl-recents";
@@ -1796,6 +2196,78 @@
         elements.imageViewerImg.src = "";
       }
 
+      function switchAuthMode(mode) {
+        if (!elements.authModal) {
+          return;
+        }
+
+        const isSignup = mode === "signup";
+        elements.authTitle.textContent = isSignup ? "Create Account" : "Login";
+        elements.loginForm.classList.toggle("active", !isSignup);
+        elements.signupForm.classList.toggle("active", isSignup);
+        elements.loginTab.classList.toggle("active", !isSignup);
+        elements.signupTab.classList.toggle("active", isSignup);
+        elements.authMessage.textContent = "";
+      }
+
+      function openAuthModal(mode = "login") {
+        if (!elements.authModal) {
+          return;
+        }
+
+        switchAuthMode(mode);
+        elements.authModal.classList.add("show");
+      }
+
+      function closeAuthModal() {
+        if (!elements.authModal) {
+          return;
+        }
+
+        elements.authModal.classList.remove("show");
+      }
+
+      function continueAsGuest() {
+        closeSidebar();
+        closeAuthModal();
+        if (!elements.form) {
+          window.location.href = "/";
+          return;
+        }
+        elements.form.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      async function handleAuthSubmit(event) {
+        event.preventDefault();
+
+        const form = event.currentTarget;
+        const button = form.querySelector("button[type='submit']");
+        button.disabled = true;
+        elements.authMessage.textContent = "";
+
+        try {
+          const response = await fetch(form.action, {
+            method: "POST",
+            body: new FormData(form),
+            headers: {
+              Accept: "application/json",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+          });
+          const data = await response.json();
+
+          if (!response.ok || !data.ok) {
+            throw new Error(data.error || "Account request failed.");
+          }
+
+          window.location.reload();
+        } catch (error) {
+          elements.authMessage.textContent = error.message || "Please try again.";
+        } finally {
+          button.disabled = false;
+        }
+      }
+
       function escapeHtml(value) {
         const node = document.createElement("div");
         node.textContent = value == null ? "" : String(value);
@@ -1850,6 +2322,11 @@
             </div>
           `
           : "";
+        const reportAction = data.report_url
+          ? `<a class="report-btn" href="${escapeHtml(data.report_url)}">Download Report</a>`
+          : !IS_AUTHENTICATED
+            ? `<button type="button" class="report-btn secondary" onclick="openAuthModal('login')">Login to save &amp; download</button>`
+            : "";
 
         elements.resultMount.innerHTML = `
           <section class="result-wrap" aria-label="Analysis result">
@@ -1876,6 +2353,7 @@
 
               ${imageType}
               ${extractedText}
+              <div class="result-actions">${reportAction}</div>
             </div>
           </section>
         `;
@@ -1896,9 +2374,18 @@
 
       function getRecents() {
         try {
-          return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+          let recents = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+
+          if (IS_AUTHENTICATED && !didHydrateServerRecents) {
+            didHydrateServerRecents = true;
+            const localOnly = recents.filter((item) => !item.serverId);
+            recents = [...SERVER_RECENTS, ...localOnly].slice(0, MAX_RECENTS);
+            setRecents(recents);
+          }
+
+          return recents;
         } catch (error) {
-          return [];
+          return IS_AUTHENTICATED ? SERVER_RECENTS : [];
         }
       }
 
@@ -1960,12 +2447,19 @@
         const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const item = {
           id,
+          serverId: data.analysis_id || null,
           title: buildRecentTitle(data),
           newsText: document.getElementById("newsText").value.trim(),
           data,
         };
         activeRecentId = id;
-        const recents = getRecents().filter((recent) => recent.title !== item.title);
+        const recents = getRecents().filter((recent) => {
+          if (item.serverId && recent.serverId === item.serverId) {
+            return false;
+          }
+
+          return recent.title !== item.title;
+        });
         setRecents([item, ...recents]);
         renderRecents();
       }
@@ -1973,6 +2467,11 @@
       function loadRecentAnalysis(id) {
         const item = getRecents().find((recent) => recent.id === id);
         if (!item) {
+          return;
+        }
+
+        if (!elements.form) {
+          window.location.href = "/";
           return;
         }
 
@@ -1987,7 +2486,22 @@
         closeSidebar();
       }
 
-      function deleteRecentAnalysis(id) {
+      async function deleteRecentAnalysis(id) {
+        const target = getRecents().find((recent) => recent.id === id);
+        if (target && target.serverId) {
+          try {
+            await fetch(`/history/${target.serverId}/delete`, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+              },
+            });
+          } catch (error) {
+            // Keep local delete responsive even if the network is temporarily unavailable.
+          }
+        }
+
         const recents = getRecents().filter((recent) => recent.id !== id);
         setRecents(recents);
 
@@ -2199,6 +2713,10 @@
       }
 
       function stopCamera(clearStatus = true) {
+        if (!elements.cameraStream) {
+          return;
+        }
+
         if (cameraStream) {
           cameraStream.getTracks().forEach((track) => track.stop());
           cameraStream = null;
@@ -2252,6 +2770,11 @@
       }
 
       function clearAll() {
+        if (!elements.form) {
+          window.location.href = "/";
+          return;
+        }
+
         activeRecentId = null;
         elements.form.reset();
         stopCamera();
@@ -2270,6 +2793,11 @@
       }
 
       function startNewChat() {
+        if (!elements.form) {
+          window.location.href = "/";
+          return;
+        }
+
         clearAll();
         closeSidebar();
         elements.form.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2308,13 +2836,27 @@
       window.toggleSidebar = toggleSidebar;
       window.openImageViewer = openImageViewer;
       window.closeImageViewer = closeImageViewer;
+      window.openAuthModal = openAuthModal;
+      window.closeAuthModal = closeAuthModal;
+      window.switchAuthMode = switchAuthMode;
+      window.continueAsGuest = continueAsGuest;
       window.startNewChat = startNewChat;
       window.setExample = setExample;
 
       applySavedTheme();
       renderRecents();
-      elements.form.addEventListener("submit", handleSubmit);
-      elements.previewImage.addEventListener("click", () => openImageViewer(elements.previewImage.src));
+      if (elements.form) {
+        elements.form.addEventListener("submit", handleSubmit);
+      }
+      if (elements.previewImage) {
+        elements.previewImage.addEventListener("click", () => openImageViewer(elements.previewImage.src));
+      }
+      if (elements.loginForm) {
+        elements.loginForm.addEventListener("submit", handleAuthSubmit);
+      }
+      if (elements.signupForm) {
+        elements.signupForm.addEventListener("submit", handleAuthSubmit);
+      }
       window.addEventListener("pointerdown", handlePointerDown, { passive: true });
       window.addEventListener("pointermove", handlePointerMove, { passive: true });
       window.addEventListener("pointerup", handlePointerUp, { passive: true });
