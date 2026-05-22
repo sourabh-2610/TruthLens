@@ -960,6 +960,92 @@
       line-height: 1.7;
     }
 
+    /* History */
+    .history-panel {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 600px;
+      margin: -0.75rem 0 1.25rem;
+      animation: fadeUp 0.55s ease 0.08s both;
+    }
+
+    .history-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.65rem;
+    }
+
+    .history-label {
+      color: var(--placeholder);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .new-chat-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.45rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.76rem;
+      font-weight: 600;
+      transition: background var(--speed), border-color var(--speed), color var(--speed);
+    }
+
+    .new-chat-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .new-chat-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .recents-list {
+      display: flex;
+      gap: 0.45rem;
+      overflow-x: auto;
+      padding-bottom: 0.15rem;
+      scrollbar-width: thin;
+    }
+
+    .recent-item {
+      max-width: 220px;
+      min-width: 140px;
+      overflow: hidden;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 0.76rem;
+      text-align: left;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: background var(--speed), color var(--speed), border-color var(--speed);
+    }
+
+    .recent-item:hover {
+      border-color: var(--border-strong);
+      background: var(--faint);
+      color: var(--text);
+    }
+
+    .recent-item.empty {
+      cursor: default;
+      opacity: 0.55;
+    }
+
     /* Examples */
     .examples {
       position: relative;
@@ -1101,6 +1187,20 @@
       <p class="hero-eyebrow">Multimodal Fact Checker</p>
       <h1 id="heroTitle">Detect <span class="accent">fake news</span><br />in seconds</h1>
       <p>Paste an article or upload an image.<br />Our ML model gives an instant verdict.</p>
+    </section>
+
+    <section class="history-panel" aria-label="Recent analyses">
+      <div class="history-top">
+        <p class="history-label">Recents</p>
+        <button type="button" class="new-chat-btn" onclick="startNewChat()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14"></path>
+            <path d="M5 12h14"></path>
+          </svg>
+          New Chat
+        </button>
+      </div>
+      <div class="recents-list" id="recentsList"></div>
     </section>
 
     <section class="card" aria-label="News analysis form">
@@ -1285,6 +1385,7 @@
         form: document.getElementById("mainForm"),
         imagePreview: document.getElementById("imgPreview"),
         previewImage: document.getElementById("previewImg"),
+        recentsList: document.getElementById("recentsList"),
         resultMount: document.getElementById("resultMount"),
         serverPreviewMount: document.getElementById("serverPreviewMount"),
         stopButton: document.getElementById("stopCameraBtn"),
@@ -1293,8 +1394,10 @@
       };
 
       let cameraStream = null;
-      const ANALYSIS_TIMEOUT_MS = 90000;
+      const ANALYSIS_TIMEOUT_MS = 30000;
       const IMAGE_RESIZE_TIMEOUT_MS = 10000;
+      const HISTORY_KEY = "tl-recents";
+      const MAX_RECENTS = 6;
 
       function applySavedTheme() {
         const savedTheme = localStorage.getItem("tl-theme");
@@ -1459,6 +1562,81 @@
         }
       }
 
+      function getRecents() {
+        try {
+          return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function setRecents(items) {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, MAX_RECENTS)));
+      }
+
+      function buildRecentTitle(data) {
+        const typedText = document.getElementById("newsText").value.trim();
+        const sourceText = typedText || data.extracted_text || elements.fileName.textContent || "Untitled analysis";
+        const compact = sourceText.replace(/\s+/g, " ").trim();
+        return compact.length > 54 ? `${compact.slice(0, 54)}...` : compact;
+      }
+
+      function renderRecents() {
+        const recents = getRecents();
+        elements.recentsList.innerHTML = "";
+
+        if (recents.length === 0) {
+          const empty = document.createElement("button");
+          empty.type = "button";
+          empty.className = "recent-item empty";
+          empty.textContent = "No recent analyses";
+          empty.disabled = true;
+          elements.recentsList.appendChild(empty);
+          return;
+        }
+
+        recents.forEach((item) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "recent-item";
+          button.textContent = item.title;
+          button.title = item.title;
+          button.addEventListener("click", () => loadRecentAnalysis(item.id));
+          elements.recentsList.appendChild(button);
+        });
+      }
+
+      function saveRecentAnalysis(data) {
+        if (!data.show_result) {
+          return;
+        }
+
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const item = {
+          id,
+          title: buildRecentTitle(data),
+          newsText: document.getElementById("newsText").value.trim(),
+          data,
+        };
+        const recents = getRecents().filter((recent) => recent.title !== item.title);
+        setRecents([item, ...recents]);
+        renderRecents();
+      }
+
+      function loadRecentAnalysis(id) {
+        const item = getRecents().find((recent) => recent.id === id);
+        if (!item) {
+          return;
+        }
+
+        stopCamera();
+        elements.form.reset();
+        document.getElementById("newsText").value = item.newsText || "";
+        updateCount(document.getElementById("newsText"));
+        clearImagePreview();
+        renderAnalysisResponse(item.data);
+      }
+
       function setLoadingState(isLoading) {
         elements.submitButton.classList.toggle("loading", isLoading);
         elements.submitButton.disabled = isLoading;
@@ -1580,6 +1758,7 @@
           }
 
           renderAnalysisResponse(data);
+          saveRecentAnalysis(data);
 
           if (window.location.pathname !== "/") {
             window.history.replaceState({}, "", "/");
@@ -1725,6 +1904,11 @@
         }
       }
 
+      function startNewChat() {
+        clearAll();
+        elements.form.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
       function setExample(chip) {
         const textarea = document.getElementById("newsText");
         textarea.value = chip.textContent.trim();
@@ -1753,9 +1937,11 @@
       window.stopCamera = stopCamera;
       window.capturePhoto = capturePhoto;
       window.clearAll = clearAll;
+      window.startNewChat = startNewChat;
       window.setExample = setExample;
 
       applySavedTheme();
+      renderRecents();
       elements.form.addEventListener("submit", handleSubmit);
       window.addEventListener("load", animateConfidence);
       window.addEventListener("beforeunload", () => stopCamera(false));

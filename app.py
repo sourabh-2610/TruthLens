@@ -17,7 +17,8 @@ app = Flask(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
-OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "18"))
+OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "8"))
+ENABLE_SLOW_OCR_FALLBACK = os.environ.get("ENABLE_SLOW_OCR_FALLBACK") == "1"
 
 # Windows-safe folder creation
 try:
@@ -212,7 +213,7 @@ def save_uploaded_image(file_storage):
 
     with Image.open(file_storage.stream) as uploaded:
         normalized = ImageOps.exif_transpose(uploaded).convert("RGB")
-        normalized = resize_for_ocr(normalized, min_dimension=900, max_dimension=1400)
+        normalized = resize_for_ocr(normalized, min_dimension=800, max_dimension=1100)
         normalized.save(image_path, "JPEG", quality=86, optimize=True)
 
     return image_path, f"uploads/{filename}"
@@ -229,18 +230,19 @@ def prepare_ocr_candidates(image_path):
 
     with Image.open(image_path) as uploaded:
         base = ImageOps.exif_transpose(uploaded).convert("RGB")
-        base = resize_for_ocr(base, min_dimension=1200, max_dimension=1800)
+        base = resize_for_ocr(base, min_dimension=900, max_dimension=1200)
 
         gray = ImageOps.grayscale(base)
-        enhanced = ImageEnhance.Contrast(gray).enhance(2.0)
-        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.6)
+        enhanced = ImageEnhance.Contrast(gray).enhance(1.9)
+        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.4)
         enhanced = enhanced.filter(ImageFilter.SHARPEN)
 
         contrast_path = save_ocr_variant(enhanced, image_path, "contrast")
         candidates.append((contrast_path, True))
 
-        normalized_path = save_ocr_variant(gray, image_path, "gray")
-        candidates.append((normalized_path, True))
+        if ENABLE_SLOW_OCR_FALLBACK:
+            normalized_path = save_ocr_variant(gray, image_path, "gray")
+            candidates.append((normalized_path, True))
 
     return candidates
 
@@ -254,17 +256,13 @@ def extract_text_from_image(image_path):
         if TESSERACT_CONFIGURED:
             ocr_runs = []
             if candidates:
-                ocr_runs.append((candidates[0], "eng", "--oem 3 --psm 6 --dpi 300"))
-            if len(candidates) > 1:
-                ocr_runs.append((candidates[1], "eng", "--oem 3 --psm 4 --dpi 300"))
+                ocr_runs.append((candidates[0][0], "eng", "--oem 1 --psm 6 --dpi 220"))
+            if ENABLE_SLOW_OCR_FALLBACK and len(candidates) > 1:
+                ocr_runs.append((candidates[1][0], "eng", "--oem 1 --psm 4 --dpi 220"))
 
             for candidate_path, language, config in ocr_runs:
                 try:
-                    # with Image.open(candidate_path) as candidate:
-                    if isinstance(candidate_path, tuple):
-                       candidate_path = candidate_path[0]
                     with Image.open(candidate_path) as candidate:
-                        
                         text = pytesseract.image_to_string(
                             candidate,
                             lang=language,
