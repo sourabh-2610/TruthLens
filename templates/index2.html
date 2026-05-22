@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TruthLens - AI Fake News Detector</title>
+  <link rel="icon" href="data:," />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -1180,15 +1181,19 @@
             <img id="previewImg" src="" alt="Preview" />
           </div>
 
-          {% if error %}
-          <div class="error-box">Warning: {{ error }}</div>
-          {% endif %}
-
-          {% if uploaded_image %}
-          <div class="img-preview show server-preview">
-            <img src="{{ url_for('static', filename=uploaded_image) }}" alt="Uploaded image" />
+          <div id="feedbackMount">
+            {% if error %}
+            <div class="error-box">Warning: {{ error }}</div>
+            {% endif %}
           </div>
-          {% endif %}
+
+          <div id="serverPreviewMount">
+            {% if uploaded_image %}
+            <div class="img-preview show server-preview">
+              <img src="{{ url_for('static', filename=uploaded_image) }}" alt="Uploaded image" />
+            </div>
+            {% endif %}
+          </div>
         </div>
 
         <div class="card-footer">
@@ -1208,45 +1213,47 @@
       </form>
     </section>
 
-    {% if prediction and show_result %}
-    <section class="result-wrap" aria-label="Analysis result">
-      <div class="result-card {{ result_class }}">
-        <div class="result-header">
-          <div class="result-icon">{% if result_class == 'real' %}&check;{% else %}&times;{% endif %}</div>
-          <div>
-            <div class="result-verdict">{{ display_prediction or prediction }}</div>
-            <div class="result-desc">
-              <span class="reason-label">{{ ui.reason_label }}</span>
-              {{ reason }}
+    <div id="resultMount">
+      {% if prediction and show_result %}
+      <section class="result-wrap" aria-label="Analysis result">
+        <div class="result-card {{ result_class }}">
+          <div class="result-header">
+            <div class="result-icon">{% if result_class == 'real' %}&check;{% else %}&times;{% endif %}</div>
+            <div>
+              <div class="result-verdict">{{ display_prediction or prediction }}</div>
+              <div class="result-desc">
+                <span class="reason-label">{{ ui.reason_label }}</span>
+                {{ reason }}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="conf-row">
-          <span class="conf-label">{{ ui.confidence_score }}</span>
-          <span class="conf-value" id="confVal">{% if confidence is not none %}{{ confidence }}%{% else %}N/A{% endif %}</span>
-        </div>
+          <div class="conf-row">
+            <span class="conf-label">{{ ui.confidence_score }}</span>
+            <span class="conf-value" id="confVal">{% if confidence is not none %}{{ confidence }}%{% else %}N/A{% endif %}</span>
+          </div>
 
-        <div class="conf-track">
-          <div class="conf-fill" id="confFill"></div>
-        </div>
+          <div class="conf-track">
+            <div class="conf-fill" id="confFill"></div>
+          </div>
 
-        {% if image_type %}
-        <div class="image-type-panel">
-          <span>{{ ui.image_type_label }}</span>
-          <strong>{{ image_type }}</strong>
-        </div>
-        {% endif %}
+          {% if image_type %}
+          <div class="image-type-panel">
+            <span>{{ ui.image_type_label }}</span>
+            <strong>{{ image_type }}</strong>
+          </div>
+          {% endif %}
 
-        {% if extracted_text %}
-        <div class="extracted-section">
-          <p class="extracted-label">{{ ui.extracted_text_label }}</p>
-          <p class="extracted-text">{{ extracted_text }}</p>
+          {% if extracted_text %}
+          <div class="extracted-section">
+            <p class="extracted-label">{{ ui.extracted_text_label }}</p>
+            <p class="extracted-text">{{ extracted_text }}</p>
+          </div>
+          {% endif %}
         </div>
-        {% endif %}
-      </div>
-    </section>
-    {% endif %}
+      </section>
+      {% endif %}
+    </div>
 
     <section class="examples" aria-label="Example headlines">
       <p class="examples-label">Try an example</p>
@@ -1272,11 +1279,14 @@
         cameraStream: document.getElementById("cameraStream"),
         captureButton: document.getElementById("captureBtn"),
         charCount: document.getElementById("charCount"),
+        feedbackMount: document.getElementById("feedbackMount"),
         fileInput: document.getElementById("fileInput"),
         fileName: document.getElementById("fileName"),
         form: document.getElementById("mainForm"),
         imagePreview: document.getElementById("imgPreview"),
         previewImage: document.getElementById("previewImg"),
+        resultMount: document.getElementById("resultMount"),
+        serverPreviewMount: document.getElementById("serverPreviewMount"),
         stopButton: document.getElementById("stopCameraBtn"),
         submitButton: document.getElementById("submitBtn"),
         uploadZone: document.getElementById("uploadZone"),
@@ -1347,6 +1357,138 @@
       function setCameraButtons(isActive) {
         elements.captureButton.disabled = !isActive;
         elements.stopButton.disabled = !isActive;
+      }
+
+      function escapeHtml(value) {
+        const node = document.createElement("div");
+        node.textContent = value == null ? "" : String(value);
+        return node.innerHTML;
+      }
+
+      function renderFeedback(message) {
+        elements.feedbackMount.innerHTML = message
+          ? `<div class="error-box">Warning: ${escapeHtml(message)}</div>`
+          : "";
+      }
+
+      function renderServerPreview(data) {
+        elements.serverPreviewMount.innerHTML = "";
+
+        if (!data.uploaded_image_url || elements.previewImage.src) {
+          return;
+        }
+
+        elements.serverPreviewMount.innerHTML = `
+          <div class="img-preview show server-preview">
+            <img src="${escapeHtml(data.uploaded_image_url)}" alt="Uploaded image" />
+          </div>
+        `;
+      }
+
+      function renderResult(data) {
+        if (!data.show_result) {
+          elements.resultMount.innerHTML = "";
+          return;
+        }
+
+        const resultClass = data.result_class === "real" ? "real" : "fake";
+        const confidence = data.confidence == null ? "N/A" : `${escapeHtml(data.confidence)}%`;
+        const confidenceLabel = escapeHtml(data.ui?.confidence_score || "Confidence Score");
+        const extractedLabel = escapeHtml(data.ui?.extracted_text_label || "Extracted Text");
+        const imageTypeLabel = escapeHtml(data.ui?.image_type_label || "Input Source");
+        const reasonLabel = escapeHtml(data.ui?.reason_label || "Reason");
+        const imageType = data.image_type
+          ? `
+            <div class="image-type-panel">
+              <span>${imageTypeLabel}</span>
+              <strong>${escapeHtml(data.image_type)}</strong>
+            </div>
+          `
+          : "";
+        const extractedText = data.extracted_text
+          ? `
+            <div class="extracted-section">
+              <p class="extracted-label">${extractedLabel}</p>
+              <p class="extracted-text">${escapeHtml(data.extracted_text)}</p>
+            </div>
+          `
+          : "";
+
+        elements.resultMount.innerHTML = `
+          <section class="result-wrap" aria-label="Analysis result">
+            <div class="result-card ${resultClass}">
+              <div class="result-header">
+                <div class="result-icon">${resultClass === "real" ? "&check;" : "&times;"}</div>
+                <div>
+                  <div class="result-verdict">${escapeHtml(data.display_prediction || data.prediction)}</div>
+                  <div class="result-desc">
+                    <span class="reason-label">${reasonLabel}</span>
+                    ${escapeHtml(data.reason)}
+                  </div>
+                </div>
+              </div>
+
+              <div class="conf-row">
+                <span class="conf-label">${confidenceLabel}</span>
+                <span class="conf-value" id="confVal">${confidence}</span>
+              </div>
+
+              <div class="conf-track">
+                <div class="conf-fill" id="confFill"></div>
+              </div>
+
+              ${imageType}
+              ${extractedText}
+            </div>
+          </section>
+        `;
+
+        animateConfidence();
+      }
+
+      function renderAnalysisResponse(data) {
+        renderFeedback(data.error);
+        renderServerPreview(data);
+        renderResult(data);
+
+        const focusTarget = data.show_result ? elements.resultMount : elements.feedbackMount;
+        if (focusTarget.textContent.trim()) {
+          focusTarget.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      }
+
+      function setLoadingState(isLoading) {
+        elements.submitButton.classList.toggle("loading", isLoading);
+        elements.submitButton.disabled = isLoading;
+      }
+
+      async function handleSubmit(event) {
+        event.preventDefault();
+        setLoadingState(true);
+        renderFeedback("");
+        elements.resultMount.innerHTML = "";
+
+        try {
+          const response = await fetch(elements.form.action, {
+            method: "POST",
+            body: new FormData(elements.form),
+            headers: {
+              Accept: "application/json",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+          });
+
+          const data = await response.json();
+          renderAnalysisResponse(data);
+
+          if (window.location.pathname !== "/") {
+            window.history.replaceState({}, "", "/");
+          }
+        } catch (error) {
+          renderFeedback("Something went wrong while analyzing. Please try again.");
+        } finally {
+          setLoadingState(false);
+        }
       }
 
       function cameraErrorMessage(error) {
@@ -1469,8 +1611,9 @@
         elements.charCount.textContent = "";
         elements.fileInput.setAttribute("name", "image");
         clearImagePreview();
-
-        document.querySelectorAll(".result-wrap, .error-box, .server-preview").forEach((element) => element.remove());
+        elements.feedbackMount.innerHTML = "";
+        elements.resultMount.innerHTML = "";
+        elements.serverPreviewMount.innerHTML = "";
 
         if (window.location.pathname !== "/") {
           window.history.replaceState({}, "", "/");
@@ -1482,11 +1625,6 @@
         textarea.value = chip.textContent.trim();
         updateCount(textarea);
         textarea.focus();
-      }
-
-      function startLoadingState() {
-        elements.submitButton.classList.add("loading");
-        elements.submitButton.disabled = true;
       }
 
       function animateConfidence() {
@@ -1513,7 +1651,7 @@
       window.setExample = setExample;
 
       applySavedTheme();
-      elements.form.addEventListener("submit", startLoadingState);
+      elements.form.addEventListener("submit", handleSubmit);
       window.addEventListener("load", animateConfidence);
       window.addEventListener("beforeunload", () => stopCamera(false));
     })();

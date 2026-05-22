@@ -5,9 +5,9 @@ import re
 import shutil
 import subprocess
 import pytesseract
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pathlib import Path
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request, url_for
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -154,39 +154,99 @@ $result.Text
     return completed.stdout.strip()
 
 
-def prepare_windows_ocr_image(image_path):
-    max_dimension = 2400
+def score_ocr_text(text):
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]{1,}", text or "")
+    return len(words), len(text or "")
 
-    with Image.open(image_path) as image:
-        if max(image.size) <= max_dimension:
-            return image_path, None
 
-        resized = image.convert("RGB")
-        resized.thumbnail((max_dimension, max_dimension))
-        temp_path = UPLOAD_FOLDER / f"ocr_{Path(image_path).stem}.png"
-        resized.save(temp_path)
-        return temp_path, temp_path
+def resize_for_ocr(image, min_dimension=1600, max_dimension=3200):
+    width, height = image.size
+    largest = max(width, height)
+    scale = 1
+
+    if largest < min_dimension:
+        scale = min_dimension / largest
+    elif largest > max_dimension:
+        scale = max_dimension / largest
+
+    if scale == 1:
+        return image
+
+    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    return image.resize(new_size, Image.Resampling.LANCZOS)
+
+
+def save_ocr_variant(image, image_path, suffix):
+    temp_path = UPLOAD_FOLDER / f"ocr_{Path(image_path).stem}_{suffix}_{os.getpid()}.png"
+    image.save(temp_path)
+    return temp_path
+
+
+def prepare_ocr_candidates(image_path):
+    candidates = [(Path(image_path), False)]
+
+    with Image.open(image_path) as uploaded:
+        base = ImageOps.exif_transpose(uploaded).convert("RGB")
+        base = resize_for_ocr(base)
+
+        normalized = save_ocr_variant(base, image_path, "normalized")
+        candidates.append((normalized, True))
+
+        gray = ImageOps.grayscale(base)
+        enhanced = ImageEnhance.Contrast(gray).enhance(1.9)
+        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.6)
+        enhanced = enhanced.filter(ImageFilter.SHARPEN)
+
+        contrast_path = save_ocr_variant(enhanced, image_path, "contrast")
+        candidates.append((contrast_path, True))
+
+        threshold = enhanced.point(lambda pixel: 255 if pixel > 165 else 0)
+        threshold_path = save_ocr_variant(threshold, image_path, "threshold")
+        candidates.append((threshold_path, True))
+
+    return candidates
 
 
 def extract_text_from_image(image_path):
-    try:
-        with Image.open(image_path) as uploaded:
-            if TESSERACT_CONFIGURED:
-                return pytesseract.image_to_string(uploaded).strip()
-    except UnidentifiedImageError:
-        raise
-    except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError):
-        pass
+    candidates = prepare_ocr_candidates(image_path)
+    texts = []
+    last_error = None
 
-    ocr_path, temp_path = prepare_windows_ocr_image(image_path)
     try:
-        return run_windows_ocr(ocr_path).strip()
+        if TESSERACT_CONFIGURED:
+            for candidate_path, _cleanup in candidates:
+                try:
+                    with Image.open(candidate_path) as candidate:
+                        texts.append(pytesseract.image_to_string(candidate).strip())
+                        texts.append(pytesseract.image_to_string(candidate, config="--psm 6").strip())
+                except UnidentifiedImageError:
+                    raise
+                except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError) as error:
+                    last_error = error
+
+        for candidate_path, _cleanup in candidates:
+            try:
+                texts.append(run_windows_ocr(candidate_path).strip())
+            except RuntimeError as error:
+                last_error = error
+            except subprocess.SubprocessError as error:
+                last_error = error
+
+        best_text = max(texts, key=score_ocr_text, default="").strip()
+        if best_text:
+            return best_text
+
+        if last_error:
+            raise last_error
+
+        return ""
     finally:
-        if temp_path and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+        for candidate_path, cleanup in candidates:
+            if cleanup and candidate_path.exists():
+                candidate_path.unlink(missing_ok=True)
 
 
-def render_index(**context):
+def build_template_context(**context):
     selected_language = normalize_language(context.get("selected_language", "en"))
     defaults = {
         "prediction": None,
@@ -204,7 +264,54 @@ def render_index(**context):
         "ui": get_ui_text(selected_language),
     }
     defaults.update(context)
+    defaults["selected_language"] = selected_language
+    defaults["ui"] = get_ui_text(selected_language)
+    return defaults
+
+
+def render_index(**context):
+    defaults = build_template_context(**context)
     return render_template("index2.html", **defaults)
+
+
+def wants_json_response():
+    accept_header = request.headers.get("Accept", "")
+    requested_with = request.headers.get("X-Requested-With", "")
+    return requested_with == "XMLHttpRequest" or "application/json" in accept_header
+
+
+def build_json_response(**context):
+    data = build_template_context(**context)
+    uploaded_image = data.get("uploaded_image")
+
+    return jsonify({
+        "ok": bool(data.get("show_result")) and not bool(data.get("error")),
+        "error": data.get("error"),
+        "prediction": data.get("prediction"),
+        "display_prediction": data.get("display_prediction"),
+        "result_class": data.get("result_class"),
+        "confidence": data.get("confidence"),
+        "reason": data.get("reason"),
+        "extracted_text": data.get("extracted_text"),
+        "uploaded_image": uploaded_image,
+        "uploaded_image_url": url_for("static", filename=uploaded_image) if uploaded_image else None,
+        "image_type": data.get("image_type"),
+        "selected_language": data.get("selected_language"),
+        "show_result": data.get("show_result"),
+        "ui": {
+            "confidence_score": data["ui"]["confidence_score"],
+            "reason_label": data["ui"]["reason_label"],
+            "image_type_label": data["ui"]["image_type_label"],
+            "extracted_text_label": data["ui"]["extracted_text_label"],
+        },
+    })
+
+
+def respond_index(**context):
+    if wants_json_response():
+        return build_json_response(**context)
+
+    return render_index(**context)
 
 
 def get_model_confidence(text_vector, prediction_raw):
@@ -438,8 +545,12 @@ def detect_screenshot_platform(text, image_info):
     }
 
     whatsapp_terms = ["whatsapp", "online", "typing", "forwarded", "end-to-end", "message", "voice message"]
-    twitter_terms = ["twitter", "tweet", "retweeted", "reposted", "reply", "quote", "followers", "following", "views", "likes", "@"]
-    news_terms = ["breaking", "exclusive", "news", "reported", "headline", "subscribe", "advertisement", "updated", "source", "live"]
+    twitter_terms = ["twitter", "tweet", "retweeted", "reposted", "reply", "quote", "followers", "following", "likes"]
+    news_terms = [
+        "breaking", "exclusive", "news", "reported", "headline", "subscribe",
+        "advertisement", "updated", "source", "live", "reuters", "edition",
+        "volume", "issue", "business", "international", "newspaper", "article",
+    ]
 
     scores["WhatsApp Chat"] += sum(2 for term in whatsapp_terms if term in text_lower)
     scores["Twitter/X Post"] += sum(2 for term in twitter_terms if term in text_lower)
@@ -452,8 +563,14 @@ def detect_screenshot_platform(text, image_info):
     if image_info["aspect_ratio"] < 0.75:
         scores["WhatsApp Chat"] += 1
         scores["Twitter/X Post"] += 1
+    if re.search(r"@\w+", text):
+        scores["Twitter/X Post"] += 2
+    if re.search(r"\b(reuters|associated press|pti|afp|ap news)\b", text_lower):
+        scores["News Screenshot"] += 4
+    if re.search(r"\b(volume|issue|edition|newspaper|page|p\d+)\b", text_lower):
+        scores["News Screenshot"] += 3
     if has_url_or_source(text):
-        scores["News Screenshot"] += 2
+        scores["News Screenshot"] += 3
 
     platform, score = max(scores.items(), key=lambda item: item[1])
     if score < 2:
@@ -582,7 +699,7 @@ def predict():
     if image and image.filename != "":
         filename = secure_filename(image.filename)
         if filename == "":
-            return render_index(error=ui["invalid_image"], selected_language=selected_language)
+            return respond_index(error=ui["invalid_image"], selected_language=selected_language)
 
         image_path = UPLOAD_FOLDER / filename
         image.save(image_path)
@@ -594,13 +711,13 @@ def predict():
             platform, _platform_scores = detect_screenshot_platform(extracted_text, image_info)
             image_type = localize_image_type(platform, selected_language)
         except UnidentifiedImageError:
-            return render_index(
+            return respond_index(
                 error=ui["invalid_image"],
                 uploaded_image=uploaded_image,
                 selected_language=selected_language
             )
         except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, RuntimeError, subprocess.SubprocessError):
-            return render_index(
+            return respond_index(
                 error=ui["ocr_failed"],
                 uploaded_image=uploaded_image,
                 selected_language=selected_language
@@ -608,8 +725,15 @@ def predict():
 
         news_text = f"{news_text} {extracted_text}".strip()
 
+        if not extracted_text.strip() and not typed_text:
+            return respond_index(
+                error=ui["ocr_failed"],
+                uploaded_image=uploaded_image,
+                selected_language=selected_language
+            )
+
     if news_text.strip() == "":
-        return render_index(
+        return respond_index(
             error=ui["missing_input"],
             uploaded_image=uploaded_image,
             selected_language=selected_language
@@ -630,8 +754,7 @@ def predict():
 
     reason = build_prediction_reason(news_text, text_vector, prediction_raw, selected_language)
 
-    return render_template(
-        "index2.html",
+    return respond_index(
         prediction=prediction,
         display_prediction=display_prediction,
         result_class=result_class,
