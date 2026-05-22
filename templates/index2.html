@@ -1081,6 +1081,40 @@
       opacity: 0.55;
     }
 
+    .mobile-menu-btn {
+      position: fixed;
+      top: 0.85rem;
+      left: 0.85rem;
+      z-index: 31;
+      width: 42px;
+      height: 42px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+
+    .mobile-menu-btn svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .sidebar-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      background: rgba(0, 0, 0, 0.55);
+    }
+
+    .sidebar-backdrop.show {
+      display: block;
+    }
+
     .delete-recent-btn {
       width: 28px;
       height: 28px;
@@ -1229,17 +1263,29 @@
     }
 
     @media (max-width: 1039px) {
+      header {
+        padding-left: 3rem;
+      }
+
+      .mobile-menu-btn {
+        display: inline-flex;
+      }
+
       .history-panel {
-        position: relative;
-        width: 100%;
-        max-width: 600px;
-        margin-bottom: 1.25rem;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
+        z-index: 30;
+        width: min(18rem, calc(100vw - 3.25rem));
+        max-width: none;
+        border-right: 1px solid var(--border);
+        transform: translateX(-105%);
+        transition: transform 0.24s ease;
+      }
+
+      .history-panel.open {
+        transform: translateX(0);
       }
 
       .recents-list {
-        max-height: 170px;
+        max-height: none;
       }
     }
 
@@ -1272,6 +1318,14 @@
 </head>
 
 <body>
+  <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu" onclick="toggleSidebar()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 6h16"></path>
+      <path d="M4 12h16"></path>
+      <path d="M4 18h16"></path>
+    </svg>
+  </button>
+
   <aside class="history-panel" aria-label="Recent analyses">
     <div class="history-top">
       <button type="button" class="new-chat-btn" onclick="startNewChat()">
@@ -1285,6 +1339,7 @@
       <div class="recents-list" id="recentsList"></div>
     </div>
   </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
 
   <header>
     <div class="brand">
@@ -1499,13 +1554,16 @@
         fileInput: document.getElementById("fileInput"),
         fileName: document.getElementById("fileName"),
         form: document.getElementById("mainForm"),
+        historyPanel: document.querySelector(".history-panel"),
         imagePreview: document.getElementById("imgPreview"),
         imageViewer: document.getElementById("imageViewer"),
         imageViewerImg: document.getElementById("imageViewerImg"),
+        mobileMenuButton: document.getElementById("mobileMenuBtn"),
         previewImage: document.getElementById("previewImg"),
         recentsList: document.getElementById("recentsList"),
         resultMount: document.getElementById("resultMount"),
         serverPreviewMount: document.getElementById("serverPreviewMount"),
+        sidebarBackdrop: document.getElementById("sidebarBackdrop"),
         stopButton: document.getElementById("stopCameraBtn"),
         submitButton: document.getElementById("submitBtn"),
         uploadZone: document.getElementById("uploadZone"),
@@ -1581,6 +1639,26 @@
       function setCameraButtons(isActive) {
         elements.captureButton.disabled = !isActive;
         elements.stopButton.disabled = !isActive;
+      }
+
+      function openSidebar() {
+        elements.historyPanel.classList.add("open");
+        elements.sidebarBackdrop.classList.add("show");
+        elements.mobileMenuButton.setAttribute("aria-label", "Close menu");
+      }
+
+      function closeSidebar() {
+        elements.historyPanel.classList.remove("open");
+        elements.sidebarBackdrop.classList.remove("show");
+        elements.mobileMenuButton.setAttribute("aria-label", "Open menu");
+      }
+
+      function toggleSidebar() {
+        if (elements.historyPanel.classList.contains("open")) {
+          closeSidebar();
+        } else {
+          openSidebar();
+        }
       }
 
       function openImageViewer(src) {
@@ -1785,6 +1863,7 @@
         clearImagePreview();
         renderAnalysisResponse(item.data);
         renderRecents();
+        closeSidebar();
       }
 
       function deleteRecentAnalysis(id) {
@@ -2071,6 +2150,7 @@
 
       function startNewChat() {
         clearAll();
+        closeSidebar();
         elements.form.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
@@ -2102,6 +2182,9 @@
       window.stopCamera = stopCamera;
       window.capturePhoto = capturePhoto;
       window.clearAll = clearAll;
+      window.openSidebar = openSidebar;
+      window.closeSidebar = closeSidebar;
+      window.toggleSidebar = toggleSidebar;
       window.openImageViewer = openImageViewer;
       window.closeImageViewer = closeImageViewer;
       window.startNewChat = startNewChat;
@@ -2114,6 +2197,7 @@
       window.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           closeImageViewer();
+          closeSidebar();
         }
       });
       window.addEventListener("load", animateConfidence);
