@@ -2,6 +2,8 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
+ENV OCR_TIMEOUT_SECONDS=22
 
 WORKDIR /app
 
@@ -10,6 +12,7 @@ RUN apt-get update \
         tesseract-ocr \
         tesseract-ocr-eng \
         tesseract-ocr-hin \
+        tesseract-ocr-osd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

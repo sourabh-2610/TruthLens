@@ -17,7 +17,7 @@ app = Flask(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
-OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "8"))
+OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "22"))
 
 # Windows-safe folder creation
 try:
@@ -82,6 +82,16 @@ def get_ui_text(language):
 
 
 def configure_tesseract():
+    tessdata_paths = [
+        os.environ.get("TESSDATA_PREFIX"),
+        "/usr/share/tesseract-ocr/5/tessdata",
+        "/usr/share/tesseract-ocr/4.00/tessdata",
+    ]
+    for tessdata_path in tessdata_paths:
+        if tessdata_path and Path(tessdata_path).exists():
+            os.environ["TESSDATA_PREFIX"] = tessdata_path
+            break
+
     candidates = [
         os.environ.get("TESSERACT_CMD"),
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
@@ -218,15 +228,18 @@ def prepare_ocr_candidates(image_path):
 
     with Image.open(image_path) as uploaded:
         base = ImageOps.exif_transpose(uploaded).convert("RGB")
-        base = resize_for_ocr(base, min_dimension=900, max_dimension=1400)
+        base = resize_for_ocr(base, min_dimension=1200, max_dimension=1800)
 
         gray = ImageOps.grayscale(base)
-        enhanced = ImageEnhance.Contrast(gray).enhance(1.8)
-        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.4)
+        enhanced = ImageEnhance.Contrast(gray).enhance(2.0)
+        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.6)
         enhanced = enhanced.filter(ImageFilter.SHARPEN)
 
         contrast_path = save_ocr_variant(enhanced, image_path, "contrast")
         candidates.append((contrast_path, True))
+
+        normalized_path = save_ocr_variant(gray, image_path, "gray")
+        candidates.append((normalized_path, True))
 
     return candidates
 
@@ -238,12 +251,21 @@ def extract_text_from_image(image_path):
 
     try:
         if TESSERACT_CONFIGURED:
-            for candidate_path, _cleanup in candidates:
+            ocr_runs = []
+            if candidates:
+                ocr_runs.append((candidates[0], "eng", "--oem 3 --psm 6"))
+            if len(candidates) > 1:
+                ocr_runs.append((candidates[1], "eng", "--oem 3 --psm 3"))
+            if candidates:
+                ocr_runs.append((candidates[0], None, "--oem 3 --psm 6"))
+
+            for candidate_path, language, config in ocr_runs:
                 try:
                     with Image.open(candidate_path) as candidate:
                         text = pytesseract.image_to_string(
                             candidate,
-                            config="-l eng --oem 3 --psm 6",
+                            lang=language,
+                            config=config,
                             timeout=OCR_TIMEOUT_SECONDS,
                         ).strip()
                         texts.append(text)
