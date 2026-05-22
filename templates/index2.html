@@ -1100,11 +1100,17 @@
       box-shadow: var(--shadow);
       transform: translateZ(0);
       touch-action: manipulation;
+      transition: opacity var(--speed), background var(--speed), border-color var(--speed), color var(--speed);
     }
 
     .mobile-menu-btn svg {
       width: 20px;
       height: 20px;
+    }
+
+    .mobile-menu-btn.is-hidden {
+      opacity: 0;
+      pointer-events: none;
     }
 
     .sidebar-backdrop {
@@ -1577,12 +1583,13 @@
       let activeRecentId = null;
       let swipeStartX = 0;
       let swipeStartY = 0;
+      let swipeTracking = false;
       const ANALYSIS_TIMEOUT_MS = 30000;
       const IMAGE_RESIZE_TIMEOUT_MS = 10000;
       const HISTORY_KEY = "tl-recents";
       const MAX_RECENTS = 6;
-      const SWIPE_EDGE_WIDTH = 34;
-      const SWIPE_DISTANCE = 58;
+      const SWIPE_EDGE_WIDTH = 90;
+      const SWIPE_DISTANCE = 42;
 
       function applySavedTheme() {
         const savedTheme = localStorage.getItem("tl-theme");
@@ -1652,12 +1659,14 @@
       function openSidebar() {
         elements.historyPanel.classList.add("open");
         elements.sidebarBackdrop.classList.add("show");
+        elements.mobileMenuButton.classList.add("is-hidden");
         elements.mobileMenuButton.setAttribute("aria-label", "Close menu");
       }
 
       function closeSidebar() {
         elements.historyPanel.classList.remove("open");
         elements.sidebarBackdrop.classList.remove("show");
+        elements.mobileMenuButton.classList.remove("is-hidden");
         elements.mobileMenuButton.setAttribute("aria-label", "Open menu");
       }
 
@@ -1672,26 +1681,58 @@
       function rememberSwipeStart(x, y) {
         swipeStartX = x;
         swipeStartY = y;
+        swipeTracking = true;
       }
 
-      function finishSwipe(x, y) {
+      function getSwipeState(x, y) {
         const deltaX = x - swipeStartX;
         const deltaY = y - swipeStartY;
         const mostlyHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.4;
         const sidebarOpen = elements.historyPanel.classList.contains("open");
 
+        return { deltaX, mostlyHorizontal, sidebarOpen };
+      }
+
+      function openSidebarFromSwipe(x, y) {
+        if (!swipeTracking) {
+          return;
+        }
+
+        const { deltaX, mostlyHorizontal, sidebarOpen } = getSwipeState(x, y);
+
+        if (sidebarOpen || !mostlyHorizontal) {
+          return;
+        }
+
+        if (swipeStartX <= SWIPE_EDGE_WIDTH && deltaX > SWIPE_DISTANCE) {
+          openSidebar();
+          swipeTracking = false;
+        }
+      }
+
+      function finishSwipe(x, y) {
+        if (!swipeTracking) {
+          return;
+        }
+
+        const { deltaX, mostlyHorizontal, sidebarOpen } = getSwipeState(x, y);
+
         if (!mostlyHorizontal) {
+          swipeTracking = false;
           return;
         }
 
         if (!sidebarOpen && swipeStartX <= SWIPE_EDGE_WIDTH && deltaX > SWIPE_DISTANCE) {
           openSidebar();
+          swipeTracking = false;
           return;
         }
 
         if (sidebarOpen && deltaX < -SWIPE_DISTANCE) {
           closeSidebar();
         }
+
+        swipeTracking = false;
       }
 
       function handleTouchStart(event) {
@@ -1712,6 +1753,15 @@
         finishSwipe(touch.clientX, touch.clientY);
       }
 
+      function handleTouchMove(event) {
+        const touch = event.touches && event.touches[0];
+        if (!touch) {
+          return;
+        }
+
+        openSidebarFromSwipe(touch.clientX, touch.clientY);
+      }
+
       function handlePointerDown(event) {
         if (event.pointerType === "mouse" && event.button !== 0) {
           return;
@@ -1726,6 +1776,10 @@
         }
 
         finishSwipe(event.clientX, event.clientY);
+      }
+
+      function handlePointerMove(event) {
+        openSidebarFromSwipe(event.clientX, event.clientY);
       }
 
       function openImageViewer(src) {
@@ -2262,8 +2316,10 @@
       elements.form.addEventListener("submit", handleSubmit);
       elements.previewImage.addEventListener("click", () => openImageViewer(elements.previewImage.src));
       window.addEventListener("pointerdown", handlePointerDown, { passive: true });
+      window.addEventListener("pointermove", handlePointerMove, { passive: true });
       window.addEventListener("pointerup", handlePointerUp, { passive: true });
       window.addEventListener("touchstart", handleTouchStart, { passive: true });
+      window.addEventListener("touchmove", handleTouchMove, { passive: true });
       window.addEventListener("touchend", handleTouchEnd, { passive: true });
       window.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
