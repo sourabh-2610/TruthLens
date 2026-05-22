@@ -92,9 +92,13 @@ def configure_tesseract():
 
 
 TESSERACT_CONFIGURED = configure_tesseract()
+IS_WINDOWS = os.name == "nt"
 
 
 def run_windows_ocr(image_path):
+    if not IS_WINDOWS:
+        raise RuntimeError("Windows OCR is only available on Windows.")
+
     powershell = shutil.which("powershell") or r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
     if not Path(powershell).exists():
         raise RuntimeError("Windows OCR is not available.")
@@ -159,7 +163,12 @@ def score_ocr_text(text):
     return len(words), len(text or "")
 
 
-def resize_for_ocr(image, min_dimension=1600, max_dimension=3200):
+def has_enough_ocr_text(text, min_words=30):
+    words, characters = score_ocr_text(text)
+    return words >= min_words or characters >= 180
+
+
+def resize_for_ocr(image, min_dimension=1500, max_dimension=2200):
     width, height = image.size
     largest = max(width, height)
     scale = 1
@@ -183,7 +192,7 @@ def save_ocr_variant(image, image_path, suffix):
 
 
 def prepare_ocr_candidates(image_path):
-    candidates = [(Path(image_path), False)]
+    candidates = []
 
     with Image.open(image_path) as uploaded:
         base = ImageOps.exif_transpose(uploaded).convert("RGB")
@@ -214,23 +223,38 @@ def extract_text_from_image(image_path):
 
     try:
         if TESSERACT_CONFIGURED:
-            for candidate_path, _cleanup in candidates:
+            ocr_runs = []
+            if candidates:
+                ocr_runs.append((candidates[0], "--oem 3 --psm 3"))
+            if len(candidates) > 1:
+                ocr_runs.append((candidates[1], "--oem 3 --psm 3"))
+                ocr_runs.append((candidates[1], "--oem 3 --psm 6"))
+            if len(candidates) > 2:
+                ocr_runs.append((candidates[2], "--oem 3 --psm 6"))
+
+            for (candidate_path, _cleanup), config in ocr_runs:
                 try:
                     with Image.open(candidate_path) as candidate:
-                        texts.append(pytesseract.image_to_string(candidate).strip())
-                        texts.append(pytesseract.image_to_string(candidate, config="--psm 6").strip())
+                        text = pytesseract.image_to_string(candidate, config=config, timeout=25).strip()
+                        texts.append(text)
+                        if has_enough_ocr_text(text):
+                            return text
                 except UnidentifiedImageError:
                     raise
-                except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError) as error:
+                except (RuntimeError, pytesseract.TesseractNotFoundError, pytesseract.TesseractError) as error:
                     last_error = error
 
-        for candidate_path, _cleanup in candidates:
-            try:
-                texts.append(run_windows_ocr(candidate_path).strip())
-            except RuntimeError as error:
-                last_error = error
-            except subprocess.SubprocessError as error:
-                last_error = error
+        if IS_WINDOWS:
+            for candidate_path, _cleanup in candidates:
+                try:
+                    text = run_windows_ocr(candidate_path).strip()
+                    texts.append(text)
+                    if has_enough_ocr_text(text):
+                        return text
+                except RuntimeError as error:
+                    last_error = error
+                except subprocess.SubprocessError as error:
+                    last_error = error
 
         best_text = max(texts, key=score_ocr_text, default="").strip()
         if best_text:

@@ -1468,10 +1468,14 @@
         renderFeedback("");
         elements.resultMount.innerHTML = "";
 
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 120000);
+
         try {
           const response = await fetch(elements.form.action, {
             method: "POST",
             body: new FormData(elements.form),
+            signal: controller.signal,
             headers: {
               Accept: "application/json",
               "X-Requested-With": "XMLHttpRequest",
@@ -1485,8 +1489,13 @@
             window.history.replaceState({}, "", "/");
           }
         } catch (error) {
-          renderFeedback("Something went wrong while analyzing. Please try again.");
+          const message =
+            error.name === "AbortError"
+              ? "Image analysis is taking too long on the server. Please try a cropped/clearer image or paste the headline text."
+              : "Something went wrong while analyzing. Please try again.";
+          renderFeedback(message);
         } finally {
+          window.clearTimeout(timeoutId);
           setLoadingState(false);
         }
       }
