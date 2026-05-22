@@ -1293,6 +1293,8 @@
       };
 
       let cameraStream = null;
+      const ANALYSIS_TIMEOUT_MS = 45000;
+      const IMAGE_RESIZE_TIMEOUT_MS = 10000;
 
       function applySavedTheme() {
         const savedTheme = localStorage.getItem("tl-theme");
@@ -1462,6 +1464,89 @@
         elements.submitButton.disabled = isLoading;
       }
 
+      function resizeImageFile(file, maxSize = 1200, quality = 0.72) {
+        if (!file || !file.type.startsWith("image/")) {
+          return Promise.resolve(file);
+        }
+
+        return new Promise((resolve) => {
+          const image = new Image();
+          const objectUrl = URL.createObjectURL(file);
+          let isSettled = false;
+
+          const finish = (result) => {
+            if (isSettled) {
+              return;
+            }
+
+            isSettled = true;
+            window.clearTimeout(timeoutId);
+            URL.revokeObjectURL(objectUrl);
+            resolve(result);
+          };
+
+          const timeoutId = window.setTimeout(() => finish(file), IMAGE_RESIZE_TIMEOUT_MS);
+
+          image.onload = () => {
+            const largestSide = Math.max(image.naturalWidth, image.naturalHeight);
+            if (largestSide <= maxSize) {
+              finish(file);
+              return;
+            }
+
+            const scale = maxSize / largestSide;
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.round(image.naturalWidth * scale);
+            canvas.height = Math.round(image.naturalHeight * scale);
+            const context = canvas.getContext("2d");
+
+            if (!context) {
+              finish(file);
+              return;
+            }
+
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+            canvas.toBlob(
+              (blob) => {
+                if (!blob) {
+                  finish(file);
+                  return;
+                }
+
+                const name = file.name.replace(/\.[^.]+$/, "") || "news-image";
+                finish(new File([blob], `${name}-optimized.jpg`, { type: "image/jpeg" }));
+              },
+              "image/jpeg",
+              quality,
+            );
+          };
+
+          image.onerror = () => {
+            finish(file);
+          };
+
+          image.src = objectUrl;
+        });
+      }
+
+      async function buildAnalysisFormData() {
+        const formData = new FormData(elements.form);
+        const imageFile = elements.fileInput.files && elements.fileInput.files[0];
+
+        if (imageFile) {
+          try {
+            setCameraStatus("Preparing image for analysis...", "success");
+            const optimizedImage = await resizeImageFile(imageFile);
+            formData.set("image", optimizedImage, optimizedImage.name);
+          } finally {
+            setCameraStatus("");
+          }
+        }
+
+        return formData;
+      }
+
       async function handleSubmit(event) {
         event.preventDefault();
         setLoadingState(true);
@@ -1469,12 +1554,12 @@
         elements.resultMount.innerHTML = "";
 
         const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), 120000);
+        const timeoutId = window.setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
 
         try {
           const response = await fetch(elements.form.action, {
             method: "POST",
-            body: new FormData(elements.form),
+            body: await buildAnalysisFormData(),
             signal: controller.signal,
             headers: {
               Accept: "application/json",
@@ -1482,7 +1567,18 @@
             },
           });
 
-          const data = await response.json();
+          const responseText = await response.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch (error) {
+            throw new Error("Server returned an invalid response.");
+          }
+
+          if (!response.ok) {
+            throw new Error(data.error || `Server error ${response.status}`);
+          }
+
           renderAnalysisResponse(data);
 
           if (window.location.pathname !== "/") {
@@ -1491,8 +1587,8 @@
         } catch (error) {
           const message =
             error.name === "AbortError"
-              ? "Image analysis is taking too long on the server. Please try a cropped/clearer image or paste the headline text."
-              : "Something went wrong while analyzing. Please try again.";
+              ? "Image analysis is taking too long. Please try a cropped/clearer image or paste the headline text."
+              : error.message || "Something went wrong while analyzing. Please try again.";
           renderFeedback(message);
         } finally {
           window.clearTimeout(timeoutId);

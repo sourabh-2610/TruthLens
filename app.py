@@ -4,16 +4,20 @@ import math
 import re
 import shutil
 import subprocess
+import uuid
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, url_for
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "8"))
 
 # Windows-safe folder creation
 try:
@@ -22,6 +26,7 @@ except FileExistsError:
     pass
 
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE
 
 model      = pickle.load(open(str(BASE_DIR / 'model.pkl'),      'rb'))
 vectorizer = pickle.load(open(str(BASE_DIR / 'vectorizer.pkl'), 'rb'))
@@ -35,6 +40,7 @@ UI_TEXT = {
         "image_type_label": "Detected Image Type",
         "extracted_text_label": "Extracted Text from Image",
         "invalid_image": "Please upload a valid image file.",
+        "file_too_large": "Image is too large. Please upload an image under 10 MB.",
         "ocr_failed": "OCR could not read this image. Please try a clearer image or paste the news text manually.",
         "missing_input": "Please add news headlines or upload an image with readable text before analyzing.",
     },
@@ -163,12 +169,12 @@ def score_ocr_text(text):
     return len(words), len(text or "")
 
 
-def has_enough_ocr_text(text, min_words=30):
+def has_enough_ocr_text(text, min_words=20):
     words, characters = score_ocr_text(text)
-    return words >= min_words or characters >= 180
+    return words >= min_words or characters >= 140
 
 
-def resize_for_ocr(image, min_dimension=1500, max_dimension=2200):
+def resize_for_ocr(image, min_dimension=1000, max_dimension=1600):
     width, height = image.size
     largest = max(width, height)
     scale = 1
@@ -185,6 +191,22 @@ def resize_for_ocr(image, min_dimension=1500, max_dimension=2200):
     return image.resize(new_size, Image.Resampling.LANCZOS)
 
 
+def save_uploaded_image(file_storage):
+    original_name = secure_filename(file_storage.filename or "")
+    if original_name == "":
+        raise UnidentifiedImageError("Missing image filename.")
+
+    filename = f"news_{uuid.uuid4().hex}.jpg"
+    image_path = UPLOAD_FOLDER / filename
+
+    with Image.open(file_storage.stream) as uploaded:
+        normalized = ImageOps.exif_transpose(uploaded).convert("RGB")
+        normalized = resize_for_ocr(normalized, min_dimension=900, max_dimension=1400)
+        normalized.save(image_path, "JPEG", quality=86, optimize=True)
+
+    return image_path, f"uploads/{filename}"
+
+
 def save_ocr_variant(image, image_path, suffix):
     temp_path = UPLOAD_FOLDER / f"ocr_{Path(image_path).stem}_{suffix}_{os.getpid()}.png"
     image.save(temp_path)
@@ -196,22 +218,15 @@ def prepare_ocr_candidates(image_path):
 
     with Image.open(image_path) as uploaded:
         base = ImageOps.exif_transpose(uploaded).convert("RGB")
-        base = resize_for_ocr(base)
-
-        normalized = save_ocr_variant(base, image_path, "normalized")
-        candidates.append((normalized, True))
+        base = resize_for_ocr(base, min_dimension=900, max_dimension=1400)
 
         gray = ImageOps.grayscale(base)
-        enhanced = ImageEnhance.Contrast(gray).enhance(1.9)
-        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.6)
+        enhanced = ImageEnhance.Contrast(gray).enhance(1.8)
+        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.4)
         enhanced = enhanced.filter(ImageFilter.SHARPEN)
 
         contrast_path = save_ocr_variant(enhanced, image_path, "contrast")
         candidates.append((contrast_path, True))
-
-        threshold = enhanced.point(lambda pixel: 255 if pixel > 165 else 0)
-        threshold_path = save_ocr_variant(threshold, image_path, "threshold")
-        candidates.append((threshold_path, True))
 
     return candidates
 
@@ -223,19 +238,14 @@ def extract_text_from_image(image_path):
 
     try:
         if TESSERACT_CONFIGURED:
-            ocr_runs = []
-            if candidates:
-                ocr_runs.append((candidates[0], "--oem 3 --psm 3"))
-            if len(candidates) > 1:
-                ocr_runs.append((candidates[1], "--oem 3 --psm 3"))
-                ocr_runs.append((candidates[1], "--oem 3 --psm 6"))
-            if len(candidates) > 2:
-                ocr_runs.append((candidates[2], "--oem 3 --psm 6"))
-
-            for (candidate_path, _cleanup), config in ocr_runs:
+            for candidate_path, _cleanup in candidates:
                 try:
                     with Image.open(candidate_path) as candidate:
-                        text = pytesseract.image_to_string(candidate, config=config, timeout=25).strip()
+                        text = pytesseract.image_to_string(
+                            candidate,
+                            config="-l eng --oem 3 --psm 6",
+                            timeout=OCR_TIMEOUT_SECONDS,
+                        ).strip()
                         texts.append(text)
                         if has_enough_ocr_text(text):
                             return text
@@ -268,6 +278,15 @@ def extract_text_from_image(image_path):
         for candidate_path, cleanup in candidates:
             if cleanup and candidate_path.exists():
                 candidate_path.unlink(missing_ok=True)
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_too_large(_error):
+    selected_language = "en"
+    ui = get_ui_text(selected_language)
+    message = ui.get("file_too_large", "Image is too large. Please upload an image under 10 MB.")
+    response = respond_index(error=message, selected_language=selected_language)
+    return response, 413
 
 
 def build_template_context(**context):
@@ -721,15 +740,8 @@ def predict():
     image = request.files.get("image")
 
     if image and image.filename != "":
-        filename = secure_filename(image.filename)
-        if filename == "":
-            return respond_index(error=ui["invalid_image"], selected_language=selected_language)
-
-        image_path = UPLOAD_FOLDER / filename
-        image.save(image_path)
-        uploaded_image = f"uploads/{filename}"
-
         try:
+            image_path, uploaded_image = save_uploaded_image(image)
             extracted_text = extract_text_from_image(image_path)
             image_info = get_image_forensics(image_path)
             platform, _platform_scores = detect_screenshot_platform(extracted_text, image_info)
