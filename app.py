@@ -260,7 +260,11 @@ def extract_text_from_image(image_path):
 
             for candidate_path, language, config in ocr_runs:
                 try:
+                    # with Image.open(candidate_path) as candidate:
+                    if isinstance(candidate_path, tuple):
+                       candidate_path = candidate_path[0]
                     with Image.open(candidate_path) as candidate:
+                        
                         text = pytesseract.image_to_string(
                             candidate,
                             lang=language,
