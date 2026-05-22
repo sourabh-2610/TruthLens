@@ -100,6 +100,12 @@
       transition: background 0.35s, color 0.35s;
     }
 
+    @media (min-width: 1040px) {
+      body {
+        padding-left: 16.5rem;
+      }
+    }
+
     body::before {
       content: "";
       position: fixed;
@@ -654,6 +660,7 @@
       max-height: 200px;
       display: block;
       object-fit: cover;
+      cursor: zoom-in;
     }
 
     .error-box {
@@ -960,25 +967,33 @@
       line-height: 1.7;
     }
 
-    /* History */
+    /* Sidebar history */
     .history-panel {
-      position: relative;
-      z-index: 1;
-      width: 100%;
-      max-width: 600px;
-      margin: -0.75rem 0 1.25rem;
-      animation: fadeUp 0.55s ease 0.08s both;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 10;
+      width: 15.5rem;
+      display: flex;
+      flex-direction: column;
+      padding: 1.1rem 0.75rem;
+      border-right: 1px solid var(--border);
+      background: var(--bg);
+      box-shadow: 16px 0 34px rgba(0, 0, 0, 0.12);
     }
 
     .history-top {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
+      flex-direction: column;
+      align-items: stretch;
       gap: 0.75rem;
-      margin-bottom: 0.65rem;
+      min-height: 0;
     }
 
     .history-label {
+      margin-top: 0.5rem;
+      padding: 0 0.35rem;
       color: var(--placeholder);
       font-size: 0.68rem;
       font-weight: 600;
@@ -989,13 +1004,15 @@
     .new-chat-btn {
       display: inline-flex;
       align-items: center;
-      gap: 0.35rem;
-      padding: 0.45rem 0.75rem;
+      justify-content: flex-start;
+      gap: 0.5rem;
+      width: 100%;
+      padding: 0.62rem 0.7rem;
       border: 1px solid var(--border);
-      border-radius: 999px;
+      border-radius: 10px;
       background: var(--surface);
       color: var(--text);
-      font-size: 0.76rem;
+      font-size: 0.86rem;
       font-weight: 600;
       transition: background var(--speed), border-color var(--speed), color var(--speed);
     }
@@ -1013,22 +1030,22 @@
 
     .recents-list {
       display: flex;
-      gap: 0.45rem;
-      overflow-x: auto;
-      padding-bottom: 0.15rem;
+      flex-direction: column;
+      gap: 0.25rem;
+      overflow-y: auto;
+      padding-right: 0.15rem;
       scrollbar-width: thin;
     }
 
     .recent-item {
-      max-width: 220px;
-      min-width: 140px;
+      width: 100%;
       overflow: hidden;
-      padding: 0.55rem 0.7rem;
-      border: 1px solid var(--border);
-      border-radius: 11px;
-      background: var(--surface);
+      padding: 0.58rem 0.7rem;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
       color: var(--muted);
-      font-size: 0.76rem;
+      font-size: 0.83rem;
       text-align: left;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -1036,14 +1053,57 @@
     }
 
     .recent-item:hover {
-      border-color: var(--border-strong);
       background: var(--faint);
       color: var(--text);
+    }
+
+    .recent-item.active {
+      background: var(--faint);
+      color: var(--text);
+      font-weight: 600;
     }
 
     .recent-item.empty {
       cursor: default;
       opacity: 0.55;
+    }
+
+    .image-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: rgba(0, 0, 0, 0.78);
+    }
+
+    .image-viewer.show {
+      display: flex;
+    }
+
+    .image-viewer img {
+      max-width: min(92vw, 1100px);
+      max-height: 88vh;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+      object-fit: contain;
+    }
+
+    .image-viewer-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      width: 40px;
+      height: 40px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.35);
+      color: #fff;
+      font-size: 1.4rem;
+      line-height: 1;
     }
 
     /* Examples */
@@ -1132,6 +1192,21 @@
       }
     }
 
+    @media (max-width: 1039px) {
+      .history-panel {
+        position: relative;
+        width: 100%;
+        max-width: 600px;
+        margin-bottom: 1.25rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+      }
+
+      .recents-list {
+        max-height: 170px;
+      }
+    }
+
     @media (max-width: 620px) {
       body {
         padding: 1.5rem 0.75rem 3rem;
@@ -1161,6 +1236,20 @@
 </head>
 
 <body>
+  <aside class="history-panel" aria-label="Recent analyses">
+    <div class="history-top">
+      <button type="button" class="new-chat-btn" onclick="startNewChat()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        New Chat
+      </button>
+      <p class="history-label">Recents</p>
+      <div class="recents-list" id="recentsList"></div>
+    </div>
+  </aside>
+
   <header>
     <div class="brand">
       <div class="brand-icon" aria-hidden="true">
@@ -1187,20 +1276,6 @@
       <p class="hero-eyebrow">Multimodal Fact Checker</p>
       <h1 id="heroTitle">Detect <span class="accent">fake news</span><br />in seconds</h1>
       <p>Paste an article or upload an image.<br />Our ML model gives an instant verdict.</p>
-    </section>
-
-    <section class="history-panel" aria-label="Recent analyses">
-      <div class="history-top">
-        <p class="history-label">Recents</p>
-        <button type="button" class="new-chat-btn" onclick="startNewChat()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 5v14"></path>
-            <path d="M5 12h14"></path>
-          </svg>
-          New Chat
-        </button>
-      </div>
-      <div class="recents-list" id="recentsList"></div>
     </section>
 
     <section class="card" aria-label="News analysis form">
@@ -1290,7 +1365,7 @@
           <div id="serverPreviewMount">
             {% if uploaded_image %}
             <div class="img-preview show server-preview">
-              <img src="{{ url_for('static', filename=uploaded_image) }}" alt="Uploaded image" />
+              <img src="{{ url_for('static', filename=uploaded_image) }}" alt="Uploaded image" onclick="openImageViewer(this.src)" />
             </div>
             {% endif %}
           </div>
@@ -1371,6 +1446,11 @@
     TruthLens AI &nbsp;&middot;&nbsp; For research and educational use only &nbsp;&middot;&nbsp; Always verify with trusted sources
   </footer>
 
+  <div class="image-viewer" id="imageViewer" role="dialog" aria-modal="true" aria-label="Uploaded image preview" onclick="closeImageViewer()">
+    <button type="button" class="image-viewer-close" aria-label="Close image preview" onclick="closeImageViewer()">&times;</button>
+    <img id="imageViewerImg" src="" alt="Uploaded image full preview" onclick="event.stopPropagation()" />
+  </div>
+
   <script>
     (() => {
       const elements = {
@@ -1384,6 +1464,8 @@
         fileName: document.getElementById("fileName"),
         form: document.getElementById("mainForm"),
         imagePreview: document.getElementById("imgPreview"),
+        imageViewer: document.getElementById("imageViewer"),
+        imageViewerImg: document.getElementById("imageViewerImg"),
         previewImage: document.getElementById("previewImg"),
         recentsList: document.getElementById("recentsList"),
         resultMount: document.getElementById("resultMount"),
@@ -1394,6 +1476,7 @@
       };
 
       let cameraStream = null;
+      let activeRecentId = null;
       const ANALYSIS_TIMEOUT_MS = 30000;
       const IMAGE_RESIZE_TIMEOUT_MS = 10000;
       const HISTORY_KEY = "tl-recents";
@@ -1464,6 +1547,20 @@
         elements.stopButton.disabled = !isActive;
       }
 
+      function openImageViewer(src) {
+        if (!src) {
+          return;
+        }
+
+        elements.imageViewerImg.src = src;
+        elements.imageViewer.classList.add("show");
+      }
+
+      function closeImageViewer() {
+        elements.imageViewer.classList.remove("show");
+        elements.imageViewerImg.src = "";
+      }
+
       function escapeHtml(value) {
         const node = document.createElement("div");
         node.textContent = value == null ? "" : String(value);
@@ -1485,7 +1582,7 @@
 
         elements.serverPreviewMount.innerHTML = `
           <div class="img-preview show server-preview">
-            <img src="${escapeHtml(data.uploaded_image_url)}" alt="Uploaded image" />
+            <img src="${escapeHtml(data.uploaded_image_url)}" alt="Uploaded image" onclick="openImageViewer(this.src)" />
           </div>
         `;
       }
@@ -1598,7 +1695,7 @@
         recents.forEach((item) => {
           const button = document.createElement("button");
           button.type = "button";
-          button.className = "recent-item";
+          button.className = item.id === activeRecentId ? "recent-item active" : "recent-item";
           button.textContent = item.title;
           button.title = item.title;
           button.addEventListener("click", () => loadRecentAnalysis(item.id));
@@ -1618,6 +1715,7 @@
           newsText: document.getElementById("newsText").value.trim(),
           data,
         };
+        activeRecentId = id;
         const recents = getRecents().filter((recent) => recent.title !== item.title);
         setRecents([item, ...recents]);
         renderRecents();
@@ -1630,11 +1728,13 @@
         }
 
         stopCamera();
+        activeRecentId = id;
         elements.form.reset();
         document.getElementById("newsText").value = item.newsText || "";
         updateCount(document.getElementById("newsText"));
         clearImagePreview();
         renderAnalysisResponse(item.data);
+        renderRecents();
       }
 
       function setLoadingState(isLoading) {
@@ -1890,6 +1990,7 @@
       }
 
       function clearAll() {
+        activeRecentId = null;
         elements.form.reset();
         stopCamera();
         elements.charCount.textContent = "";
@@ -1902,6 +2003,8 @@
         if (window.location.pathname !== "/") {
           window.history.replaceState({}, "", "/");
         }
+
+        renderRecents();
       }
 
       function startNewChat() {
@@ -1937,12 +2040,20 @@
       window.stopCamera = stopCamera;
       window.capturePhoto = capturePhoto;
       window.clearAll = clearAll;
+      window.openImageViewer = openImageViewer;
+      window.closeImageViewer = closeImageViewer;
       window.startNewChat = startNewChat;
       window.setExample = setExample;
 
       applySavedTheme();
       renderRecents();
       elements.form.addEventListener("submit", handleSubmit);
+      elements.previewImage.addEventListener("click", () => openImageViewer(elements.previewImage.src));
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeImageViewer();
+        }
+      });
       window.addEventListener("load", animateConfidence);
       window.addEventListener("beforeunload", () => stopCamera(false));
     })();
