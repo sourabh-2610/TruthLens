@@ -93,6 +93,7 @@
       flex-direction: column;
       align-items: center;
       overflow-x: hidden;
+      overscroll-behavior-x: contain;
       padding: 2.5rem 1rem 4rem;
       background: var(--bg);
       color: var(--text);
@@ -981,6 +982,7 @@
       border-right: 1px solid var(--border);
       background: var(--bg);
       box-shadow: 16px 0 34px rgba(0, 0, 0, 0.12);
+      will-change: transform;
     }
 
     .history-top {
@@ -1082,10 +1084,10 @@
     }
 
     .mobile-menu-btn {
-      position: fixed;
-      top: 0.85rem;
-      left: 0.85rem;
-      z-index: 31;
+      position: fixed !important;
+      top: max(0.85rem, env(safe-area-inset-top));
+      left: max(0.85rem, env(safe-area-inset-left));
+      z-index: 60;
       width: 42px;
       height: 42px;
       display: none;
@@ -1096,6 +1098,8 @@
       background: var(--surface);
       color: var(--text);
       box-shadow: var(--shadow);
+      transform: translateZ(0);
+      touch-action: manipulation;
     }
 
     .mobile-menu-btn svg {
@@ -1281,7 +1285,7 @@
       }
 
       .history-panel.open {
-        transform: translateX(0);
+        transform: translateX(0) !important;
       }
 
       .recents-list {
@@ -1571,10 +1575,14 @@
 
       let cameraStream = null;
       let activeRecentId = null;
+      let swipeStartX = 0;
+      let swipeStartY = 0;
       const ANALYSIS_TIMEOUT_MS = 30000;
       const IMAGE_RESIZE_TIMEOUT_MS = 10000;
       const HISTORY_KEY = "tl-recents";
       const MAX_RECENTS = 6;
+      const SWIPE_EDGE_WIDTH = 34;
+      const SWIPE_DISTANCE = 58;
 
       function applySavedTheme() {
         const savedTheme = localStorage.getItem("tl-theme");
@@ -1659,6 +1667,65 @@
         } else {
           openSidebar();
         }
+      }
+
+      function rememberSwipeStart(x, y) {
+        swipeStartX = x;
+        swipeStartY = y;
+      }
+
+      function finishSwipe(x, y) {
+        const deltaX = x - swipeStartX;
+        const deltaY = y - swipeStartY;
+        const mostlyHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.4;
+        const sidebarOpen = elements.historyPanel.classList.contains("open");
+
+        if (!mostlyHorizontal) {
+          return;
+        }
+
+        if (!sidebarOpen && swipeStartX <= SWIPE_EDGE_WIDTH && deltaX > SWIPE_DISTANCE) {
+          openSidebar();
+          return;
+        }
+
+        if (sidebarOpen && deltaX < -SWIPE_DISTANCE) {
+          closeSidebar();
+        }
+      }
+
+      function handleTouchStart(event) {
+        const touch = event.touches && event.touches[0];
+        if (!touch) {
+          return;
+        }
+
+        rememberSwipeStart(touch.clientX, touch.clientY);
+      }
+
+      function handleTouchEnd(event) {
+        const touch = event.changedTouches && event.changedTouches[0];
+        if (!touch) {
+          return;
+        }
+
+        finishSwipe(touch.clientX, touch.clientY);
+      }
+
+      function handlePointerDown(event) {
+        if (event.pointerType === "mouse" && event.button !== 0) {
+          return;
+        }
+
+        rememberSwipeStart(event.clientX, event.clientY);
+      }
+
+      function handlePointerUp(event) {
+        if (event.pointerType === "mouse" && event.button !== 0) {
+          return;
+        }
+
+        finishSwipe(event.clientX, event.clientY);
       }
 
       function openImageViewer(src) {
@@ -2194,6 +2261,10 @@
       renderRecents();
       elements.form.addEventListener("submit", handleSubmit);
       elements.previewImage.addEventListener("click", () => openImageViewer(elements.previewImage.src));
+      window.addEventListener("pointerdown", handlePointerDown, { passive: true });
+      window.addEventListener("pointerup", handlePointerUp, { passive: true });
+      window.addEventListener("touchstart", handleTouchStart, { passive: true });
+      window.addEventListener("touchend", handleTouchEnd, { passive: true });
       window.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           closeImageViewer();
