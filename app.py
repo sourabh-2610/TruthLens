@@ -9,7 +9,7 @@ import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, url_for
-from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -17,7 +17,7 @@ app = Flask(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
-OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "22"))
+OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "18"))
 
 # Windows-safe folder creation
 try:
@@ -43,6 +43,7 @@ UI_TEXT = {
         "file_too_large": "Image is too large. Please upload an image under 10 MB.",
         "ocr_failed": "OCR could not read this image. Please try a clearer image or paste the news text manually.",
         "missing_input": "Please add news headlines or upload an image with readable text before analyzing.",
+        "server_error": "Server error while analyzing. Please try again.",
     },
     "hi": {
         "real_news": "असली खबर",
@@ -253,11 +254,9 @@ def extract_text_from_image(image_path):
         if TESSERACT_CONFIGURED:
             ocr_runs = []
             if candidates:
-                ocr_runs.append((candidates[0], "eng", "--oem 3 --psm 6"))
+                ocr_runs.append((candidates[0], "eng", "--oem 3 --psm 6 --dpi 300"))
             if len(candidates) > 1:
-                ocr_runs.append((candidates[1], "eng", "--oem 3 --psm 3"))
-            if candidates:
-                ocr_runs.append((candidates[0], None, "--oem 3 --psm 6"))
+                ocr_runs.append((candidates[1], "eng", "--oem 3 --psm 4 --dpi 300"))
 
             for candidate_path, language, config in ocr_runs:
                 try:
@@ -293,7 +292,7 @@ def extract_text_from_image(image_path):
             return best_text
 
         if last_error:
-            raise last_error
+            app.logger.warning("OCR failed for %s: %s", image_path, last_error)
 
         return ""
     finally:
@@ -309,6 +308,21 @@ def handle_request_too_large(_error):
     message = ui.get("file_too_large", "Image is too large. Please upload an image under 10 MB.")
     response = respond_index(error=message, selected_language=selected_language)
     return response, 413
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    if isinstance(error, HTTPException):
+        return error
+
+    app.logger.exception("Unexpected server error")
+    selected_language = normalize_language(request.form.get("language", "en"))
+    ui = get_ui_text(selected_language)
+    response = respond_index(
+        error=ui.get("server_error", "Server error while analyzing. Please try again."),
+        selected_language=selected_language,
+    )
+    return response, 500
 
 
 def build_template_context(**context):
@@ -775,6 +789,13 @@ def predict():
                 selected_language=selected_language
             )
         except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, RuntimeError, subprocess.SubprocessError):
+            return respond_index(
+                error=ui["ocr_failed"],
+                uploaded_image=uploaded_image,
+                selected_language=selected_language
+            )
+        except Exception:
+            app.logger.exception("Image OCR failed")
             return respond_index(
                 error=ui["ocr_failed"],
                 uploaded_image=uploaded_image,

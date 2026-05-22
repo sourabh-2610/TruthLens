@@ -1572,7 +1572,7 @@
           try {
             data = JSON.parse(responseText);
           } catch (error) {
-            throw new Error("Server returned an invalid response.");
+            throw new Error("The server restarted or timed out during OCR. Please wait a few seconds and try again.");
           }
 
           if (!response.ok) {
