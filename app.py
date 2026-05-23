@@ -1,11 +1,14 @@
 import os
 import pickle
+import json
 import math
 import re
 import shutil
 import sqlite3
 import subprocess
 import uuid
+import urllib.parse
+import urllib.request
 import pytesseract
 from datetime import datetime
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
@@ -33,6 +36,11 @@ except FileExistsError:
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "truthlens-dev-secret-key")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
 def get_db_connection():
@@ -609,6 +617,55 @@ def auth_error(message, status=400):
     return render_index(error=message), status
 
 
+def google_oauth_configured():
+    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+
+def fetch_json(url, data=None, headers=None):
+    body = None
+    request_headers = headers or {}
+
+    if data is not None:
+        body = urllib.parse.urlencode(data).encode("utf-8")
+        request_headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            **request_headers,
+        }
+
+    request_object = urllib.request.Request(url, data=body, headers=request_headers)
+    with urllib.request.urlopen(request_object, timeout=12) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def login_or_create_google_user(profile):
+    email = (profile.get("email") or "").strip().lower()
+    name = (profile.get("name") or email.split("@")[0] or "Google User").strip()
+
+    if not email:
+        raise ValueError("Google did not return an email address.")
+
+    with get_db_connection() as connection:
+        user = connection.execute(
+            "SELECT id FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+
+        if user:
+            user_id = user["id"]
+        else:
+            cursor = connection.execute(
+                """
+                INSERT INTO users (name, email, password_hash, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, email, generate_password_hash(uuid.uuid4().hex), now_string()),
+            )
+            user_id = cursor.lastrowid
+
+    session["user_id"] = user_id
+    session.pop("guest_mode", None)
+
+
 @app.route("/signup", methods=["POST"])
 def signup():
     name = request.form.get("name", "").strip()
@@ -660,6 +717,63 @@ def login():
 
     if wants_json_response():
         return jsonify({"ok": True, "message": "Logged in successfully."})
+
+    return redirect(url_for("home"))
+
+
+@app.route("/auth/google")
+def google_login():
+    if not google_oauth_configured():
+        return auth_error("Google login is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Render.")
+
+    state = uuid.uuid4().hex
+    session["google_oauth_state"] = state
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": url_for("google_callback", _external=True),
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "prompt": "select_account",
+    }
+    return redirect(f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}")
+
+
+@app.route("/auth/google/callback")
+def google_callback():
+    expected_state = session.pop("google_oauth_state", None)
+    received_state = request.args.get("state")
+    code = request.args.get("code")
+
+    if not expected_state or received_state != expected_state:
+        return auth_error("Google login session expired. Please try again.")
+
+    if not code:
+        return auth_error("Google login was cancelled or failed.")
+
+    try:
+        token_data = fetch_json(
+            GOOGLE_TOKEN_URL,
+            {
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": url_for("google_callback", _external=True),
+                "grant_type": "authorization_code",
+            },
+        )
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise ValueError("Google did not return an access token.")
+
+        profile = fetch_json(
+            GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        login_or_create_google_user(profile)
+    except Exception:
+        app.logger.exception("Google login failed")
+        return auth_error("Google login failed. Please try email login or try again later.")
 
     return redirect(url_for("home"))
 

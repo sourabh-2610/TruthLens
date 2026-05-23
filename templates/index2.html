@@ -1349,6 +1349,36 @@
       font-weight: 800;
     }
 
+    .google-btn {
+      width: 100%;
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
+      margin-bottom: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.86rem;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .google-mark {
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #fff;
+      color: #4285f4;
+      font-family: Arial, sans-serif;
+      font-size: 0.9rem;
+      font-weight: 800;
+    }
+
     .auth-modal {
       position: fixed;
       inset: 0;
@@ -1785,6 +1815,11 @@
           <button type="button" id="gateSignupTab" data-auth-tab="signup" onclick="switchAuthMode('signup')">Sign Up</button>
         </div>
 
+        <a class="google-btn" href="{{ url_for('google_login') }}">
+          <span class="google-mark" aria-hidden="true">G</span>
+          Continue with Google
+        </a>
+
         <form class="auth-form active" id="gateLoginForm" action="{{ url_for('login') }}" method="POST" data-auth-form data-auth-mode="login">
           <input type="email" name="email" placeholder="Email" autocomplete="email" required />
           <input type="password" name="password" placeholder="Password" autocomplete="current-password" required />
@@ -1802,7 +1837,7 @@
           <button type="submit" class="guest-btn">Continue as Guest</button>
         </form>
 
-        <div class="auth-message" id="gateAuthMessage" data-auth-message></div>
+        <div class="auth-message" id="gateAuthMessage" data-auth-message>{% if error %}{{ error }}{% endif %}</div>
       </div>
     </section>
   </main>
@@ -2053,6 +2088,11 @@
         <button type="button" id="signupTab" data-auth-tab="signup" onclick="switchAuthMode('signup')">Sign Up</button>
       </div>
 
+      <a class="google-btn" href="{{ url_for('google_login') }}">
+        <span class="google-mark" aria-hidden="true">G</span>
+        Continue with Google
+      </a>
+
       <form class="auth-form active" id="loginForm" action="{{ url_for('login') }}" method="POST" data-auth-form data-auth-mode="login">
         <input type="email" name="email" placeholder="Email" autocomplete="email" required />
         <input type="password" name="password" placeholder="Password" autocomplete="current-password" required />
@@ -2066,7 +2106,7 @@
         <button type="submit">Create Account</button>
       </form>
 
-      <div class="auth-message" id="authMessage" data-auth-message></div>
+      <div class="auth-message" id="authMessage" data-auth-message>{% if error %}{{ error }}{% endif %}</div>
     </div>
   </div>
   {% endif %}
