@@ -524,6 +524,7 @@ def handle_unexpected_error(error):
 def build_template_context(**context):
     selected_language = normalize_language(context.get("selected_language", "en"))
     current_user = get_current_user()
+    is_guest = bool(session.get("guest_mode")) and not current_user
     defaults = {
         "prediction": None,
         "display_prediction": None,
@@ -542,6 +543,8 @@ def build_template_context(**context):
         "selected_language": selected_language,
         "ui": get_ui_text(selected_language),
         "current_user": current_user,
+        "is_guest": is_guest,
+        "show_auth_gate": not current_user and not is_guest,
         "saved_recents": get_user_analyses(current_user["id"], limit=6) if current_user else [],
         "dashboard_stats": None,
         "dashboard_items": [],
@@ -628,6 +631,7 @@ def signup():
                 (name, email, generate_password_hash(password), now_string()),
             )
             session["user_id"] = cursor.lastrowid
+            session.pop("guest_mode", None)
     except sqlite3.IntegrityError:
         return auth_error("An account with this email already exists.")
 
@@ -652,6 +656,7 @@ def login():
         return auth_error("Invalid email or password.")
 
     session["user_id"] = user["id"]
+    session.pop("guest_mode", None)
 
     if wants_json_response():
         return jsonify({"ok": True, "message": "Logged in successfully."})
@@ -662,6 +667,18 @@ def login():
 @app.route("/logout", methods=["POST"])
 def logout():
     session.pop("user_id", None)
+    session.pop("guest_mode", None)
+
+    if wants_json_response():
+        return jsonify({"ok": True})
+
+    return redirect(url_for("home"))
+
+
+@app.route("/guest", methods=["POST"])
+def continue_guest():
+    session.pop("user_id", None)
+    session["guest_mode"] = True
 
     if wants_json_response():
         return jsonify({"ok": True})
