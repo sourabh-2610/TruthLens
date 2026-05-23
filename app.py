@@ -38,6 +38,7 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "truthlens-dev-secret-key")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "").strip()
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
@@ -553,6 +554,7 @@ def build_template_context(**context):
         "current_user": current_user,
         "is_guest": is_guest,
         "show_auth_gate": not current_user and not is_guest,
+        "google_enabled": google_oauth_configured(),
         "saved_recents": get_user_analyses(current_user["id"], limit=6) if current_user else [],
         "dashboard_stats": None,
         "dashboard_items": [],
@@ -619,6 +621,10 @@ def auth_error(message, status=400):
 
 def google_oauth_configured():
     return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+
+def get_google_redirect_uri():
+    return GOOGLE_REDIRECT_URI or url_for("google_callback", _external=True)
 
 
 def fetch_json(url, data=None, headers=None):
@@ -730,7 +736,7 @@ def google_login():
     session["google_oauth_state"] = state
     params = {
         "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": url_for("google_callback", _external=True),
+        "redirect_uri": get_google_redirect_uri(),
         "response_type": "code",
         "scope": "openid email profile",
         "state": state,
@@ -758,7 +764,7 @@ def google_callback():
                 "code": code,
                 "client_id": GOOGLE_CLIENT_ID,
                 "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": url_for("google_callback", _external=True),
+                "redirect_uri": get_google_redirect_uri(),
                 "grant_type": "authorization_code",
             },
         )

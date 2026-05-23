@@ -1366,6 +1366,11 @@
       text-decoration: none;
     }
 
+    .google-btn.is-disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+    }
+
     .google-mark {
       width: 20px;
       height: 20px;
@@ -1815,10 +1820,17 @@
           <button type="button" id="gateSignupTab" data-auth-tab="signup" onclick="switchAuthMode('signup')">Sign Up</button>
         </div>
 
+        {% if google_enabled %}
         <a class="google-btn" href="{{ url_for('google_login') }}">
           <span class="google-mark" aria-hidden="true">G</span>
           Continue with Google
         </a>
+        {% else %}
+        <div class="google-btn is-disabled" aria-disabled="true">
+          <span class="google-mark" aria-hidden="true">G</span>
+          Google setup required
+        </div>
+        {% endif %}
 
         <form class="auth-form active" id="gateLoginForm" action="{{ url_for('login') }}" method="POST" data-auth-form data-auth-mode="login">
           <input type="email" name="email" placeholder="Email" autocomplete="email" required />
@@ -2088,10 +2100,17 @@
         <button type="button" id="signupTab" data-auth-tab="signup" onclick="switchAuthMode('signup')">Sign Up</button>
       </div>
 
+      {% if google_enabled %}
       <a class="google-btn" href="{{ url_for('google_login') }}">
         <span class="google-mark" aria-hidden="true">G</span>
         Continue with Google
       </a>
+      {% else %}
+      <div class="google-btn is-disabled" aria-disabled="true">
+        <span class="google-mark" aria-hidden="true">G</span>
+        Google setup required
+      </div>
+      {% endif %}
 
       <form class="auth-form active" id="loginForm" action="{{ url_for('login') }}" method="POST" data-auth-form data-auth-mode="login">
         <input type="email" name="email" placeholder="Email" autocomplete="email" required />
