@@ -968,6 +968,31 @@
       line-height: 1.7;
     }
 
+    .ai-explain-panel {
+      margin-top: 1rem;
+      padding: 0.9rem;
+      border: 1px solid rgba(128, 128, 128, 0.14);
+      border-radius: 12px;
+      background: rgba(128, 128, 128, 0.06);
+    }
+
+    .ai-explain-panel span {
+      display: block;
+      margin-bottom: 0.45rem;
+      color: var(--muted);
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .ai-explain-panel p {
+      color: var(--text);
+      font-size: 0.84rem;
+      font-weight: 300;
+      line-height: 1.7;
+    }
+
     .result-actions {
       display: flex;
       flex-wrap: wrap;
@@ -2055,6 +2080,13 @@
           </div>
           {% endif %}
 
+          {% if human_explanation %}
+          <div class="ai-explain-panel">
+            <span>AI Explanation</span>
+            <p>{{ human_explanation }}</p>
+          </div>
+          {% endif %}
+
           {% if report_url %}
           <div class="result-actions">
             <a class="report-btn" href="{{ report_url }}">Download Report</a>
@@ -2532,6 +2564,14 @@
             </div>
           `
           : "";
+        const humanExplanation = data.human_explanation
+          ? `
+            <div class="ai-explain-panel">
+              <span>AI Explanation</span>
+              <p>${escapeHtml(data.human_explanation)}</p>
+            </div>
+          `
+          : "";
         const reportAction = data.report_url
           ? `<a class="report-btn" href="${escapeHtml(data.report_url)}">Download Report</a>`
           : "";
@@ -2561,6 +2601,7 @@
 
               ${imageType}
               ${extractedText}
+              ${humanExplanation}
               ${reportAction ? `<div class="result-actions">${reportAction}</div>` : ""}
             </div>
           </section>

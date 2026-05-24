@@ -73,6 +73,7 @@ def init_database():
                 result_class TEXT NOT NULL,
                 confidence REAL,
                 reason TEXT,
+                human_explanation TEXT,
                 extracted_text TEXT,
                 uploaded_image TEXT,
                 image_type TEXT,
@@ -81,6 +82,13 @@ def init_database():
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
+
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(analyses)").fetchall()
+        }
+        if "human_explanation" not in columns:
+            connection.execute("ALTER TABLE analyses ADD COLUMN human_explanation TEXT")
 
 
 def now_string():
@@ -180,6 +188,7 @@ def serialize_analysis_row(row):
         "result_class": row["result_class"],
         "confidence": row["confidence"],
         "reason": row["reason"],
+        "human_explanation": row["human_explanation"],
         "extracted_text": row["extracted_text"],
         "uploaded_image": uploaded_image,
         "uploaded_image_url": url_for("static", filename=uploaded_image) if uploaded_image else None,
@@ -262,10 +271,10 @@ def save_analysis_for_current_user(**analysis):
             """
             INSERT INTO analyses (
                 user_id, title, news_text, prediction, display_prediction,
-                result_class, confidence, reason, extracted_text, uploaded_image,
-                image_type, language, created_at
+                result_class, confidence, reason, human_explanation,
+                extracted_text, uploaded_image, image_type, language, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -276,6 +285,7 @@ def save_analysis_for_current_user(**analysis):
                 analysis["result_class"],
                 analysis.get("confidence"),
                 analysis.get("reason"),
+                analysis.get("human_explanation"),
                 analysis.get("extracted_text"),
                 analysis.get("uploaded_image"),
                 analysis.get("image_type"),
@@ -540,6 +550,7 @@ def build_template_context(**context):
         "result_class": None,
         "confidence": None,
         "reason": None,
+        "human_explanation": None,
         "extracted_text": None,
         "uploaded_image": None,
         "image_type": None,
@@ -588,6 +599,7 @@ def build_json_response(**context):
         "result_class": data.get("result_class"),
         "confidence": data.get("confidence"),
         "reason": data.get("reason"),
+        "human_explanation": data.get("human_explanation"),
         "extracted_text": data.get("extracted_text"),
         "uploaded_image": uploaded_image,
         "uploaded_image_url": url_for("static", filename=uploaded_image) if uploaded_image else None,
@@ -876,6 +888,9 @@ Submitted Text:
 
 Extracted Image Text:
 {row['extracted_text'] or 'No extracted image text.'}
+
+AI Explanation:
+{row['human_explanation'] or 'No simple explanation available.'}
 """
 
     filename = f"truthlens-report-{analysis_id}.txt"
@@ -998,6 +1013,44 @@ def build_prediction_reason(news_text, text_vector, prediction_raw, language):
     if signal_text:
         return f"The model marked this as Fake News because key terms like {signal_text} match patterns commonly found in fake or misleading news articles."
     return "The model marked this as Fake News because the writing pattern is closer to fake or misleading news articles."
+
+
+def build_human_explanation(prediction_raw, confidence, typed_text, extracted_text, uploaded_image, image_type, language):
+    language = normalize_language(language)
+    is_real = int(prediction_raw) == 1
+    source_note = ""
+
+    if uploaded_image:
+        source_note = " The image result depends on how clearly OCR could read the screenshot."
+    elif typed_text:
+        source_note = " The result is based on the headline or article text you pasted."
+
+    if confidence is None:
+        confidence_note = "The confidence score is unavailable, so use this as a rough guide."
+    elif confidence >= 85:
+        confidence_note = "The model found a strong pattern, so confidence is high."
+    elif confidence >= 65:
+        confidence_note = "The model found a useful pattern, but you should still double-check it."
+    else:
+        confidence_note = "The confidence is low, so treat this as a warning and verify manually."
+
+    if language == "hi":
+        if is_real:
+            verdict_note = "Simple explanation: Yeh news real lag rahi hai kyunki iska writing style normal news report jaisa hai."
+            action_note = "Phir bhi source, date, aur trusted news websites par check karna better hai."
+        else:
+            verdict_note = "Simple explanation: Yeh news suspicious lag rahi hai kyunki iska wording misleading ya fake news patterns se match karta hai."
+            action_note = "Isko share karne se pehle source, date, aur trusted reports se verify karo."
+        return f"{verdict_note} {confidence_note}{source_note} {action_note}"
+
+    if is_real:
+        verdict_note = "In simple words, this news looks more likely to be real because its wording is closer to regular news reporting."
+        action_note = "Still, check the source, date, and trusted reports before fully trusting it."
+    else:
+        verdict_note = "In simple words, this news looks suspicious because its wording is closer to fake or misleading news patterns."
+        action_note = "Do not share it until you verify the source, date, and trusted news coverage."
+
+    return f"{verdict_note} {confidence_note}{source_note} {action_note}"
 
 
 def localize_image_type(platform, language):
@@ -1325,6 +1378,15 @@ def predict():
         result_class = "fake"
 
     reason = build_prediction_reason(news_text, text_vector, prediction_raw, selected_language)
+    human_explanation = build_human_explanation(
+        prediction_raw,
+        confidence,
+        typed_text,
+        extracted_text,
+        uploaded_image,
+        image_type,
+        selected_language,
+    )
     analysis_id = save_analysis_for_current_user(
         news_text=news_text,
         typed_text=typed_text,
@@ -1333,6 +1395,7 @@ def predict():
         result_class=result_class,
         confidence=confidence,
         reason=reason,
+        human_explanation=human_explanation,
         extracted_text=extracted_text,
         uploaded_image=uploaded_image,
         image_type=image_type,
@@ -1346,6 +1409,7 @@ def predict():
         result_class=result_class,
         confidence=confidence,
         reason=reason,
+        human_explanation=human_explanation,
         extracted_text=extracted_text,
         uploaded_image=uploaded_image,
         image_type=image_type,
