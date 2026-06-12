@@ -27,11 +27,12 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
 DATABASE_PATH = Path(os.environ.get("TRUTHLENS_DB_PATH", BASE_DIR / "truthlens.db"))
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
-OCR_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_TIMEOUT_SECONDS", "15")))
-OCR_RETRY_TIMEOUT_SECONDS = max(8, int(os.environ.get("OCR_RETRY_TIMEOUT_SECONDS", "8")))
+OCR_TIMEOUT_SECONDS = max(30, int(os.environ.get("OCR_TIMEOUT_SECONDS", "30")))
+OCR_RETRY_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_RETRY_TIMEOUT_SECONDS", "15")))
 OCR_CACHE_SIZE = max(1, int(os.environ.get("OCR_CACHE_SIZE", "32")))
 ENABLE_SLOW_OCR_FALLBACK = os.environ.get("ENABLE_SLOW_OCR_FALLBACK") == "1"
 OCR_TEXT_CACHE = OrderedDict()
+OCR_VISUAL_CACHE = OrderedDict()
 
 # Windows-safe folder creation
 try:
@@ -413,22 +414,66 @@ def get_image_hash(image_path):
     return digest.hexdigest()
 
 
-def get_cached_ocr_text(image_hash):
+def get_image_fingerprint(image_path):
+    with Image.open(image_path) as image:
+        normalized = ImageOps.exif_transpose(image).convert("L")
+        width, height = normalized.size
+        sample = normalized.resize((17, 16), Image.Resampling.BILINEAR)
+        pixels = list(sample.getdata())
+
+    bits = []
+    for row in range(16):
+        offset = row * 17
+        for column in range(16):
+            bits.append(pixels[offset + column] > pixels[offset + column + 1])
+
+    fingerprint = 0
+    for bit in bits:
+        fingerprint = (fingerprint << 1) | int(bit)
+
+    aspect_ratio = round(width / height, 2) if height else 0
+    return f"{aspect_ratio}:{fingerprint:064x}"
+
+
+def get_cached_ocr_text(image_hash, image_fingerprint):
     text = OCR_TEXT_CACHE.get(image_hash)
     if text is not None:
         OCR_TEXT_CACHE.move_to_end(image_hash)
-    return text
+        return text
+
+    text = OCR_VISUAL_CACHE.get(image_fingerprint)
+    if text is not None:
+        OCR_VISUAL_CACHE.move_to_end(image_fingerprint)
+        return text
+
+    current_ratio, current_hash = image_fingerprint.split(":", 1)
+    current_ratio = float(current_ratio)
+    current_hash = int(current_hash, 16)
+
+    for cached_fingerprint, cached_text in reversed(OCR_VISUAL_CACHE.items()):
+        cached_ratio, cached_hash = cached_fingerprint.split(":", 1)
+        if abs(current_ratio - float(cached_ratio)) > 0.03:
+            continue
+        if (current_hash ^ int(cached_hash, 16)).bit_count() <= 12:
+            OCR_VISUAL_CACHE.move_to_end(cached_fingerprint)
+            return cached_text
+
+    return None
 
 
-def cache_ocr_text(image_hash, text):
+def cache_ocr_text(image_hash, image_fingerprint, text):
     if not text:
         return
 
     OCR_TEXT_CACHE[image_hash] = text
     OCR_TEXT_CACHE.move_to_end(image_hash)
+    OCR_VISUAL_CACHE[image_fingerprint] = text
+    OCR_VISUAL_CACHE.move_to_end(image_fingerprint)
 
     while len(OCR_TEXT_CACHE) > OCR_CACHE_SIZE:
         OCR_TEXT_CACHE.popitem(last=False)
+    while len(OCR_VISUAL_CACHE) > OCR_CACHE_SIZE:
+        OCR_VISUAL_CACHE.popitem(last=False)
 
 
 def resize_for_fast_retry(image, max_dimension=800):
@@ -507,7 +552,8 @@ def prepare_ocr_candidates(image_path):
 
 def extract_text_from_image(image_path):
     image_hash = get_image_hash(image_path)
-    cached_text = get_cached_ocr_text(image_hash)
+    image_fingerprint = get_image_fingerprint(image_path)
+    cached_text = get_cached_ocr_text(image_hash, image_fingerprint)
     if cached_text is not None:
         app.logger.info("OCR cache hit for %s", Path(image_path).name)
         return cached_text
@@ -536,7 +582,7 @@ def extract_text_from_image(image_path):
                         ).strip()
                         texts.append(text)
                         if has_enough_ocr_text(text):
-                            cache_ocr_text(image_hash, text)
+                            cache_ocr_text(image_hash, image_fingerprint, text)
                             return text
                 except UnidentifiedImageError:
                     raise
@@ -545,17 +591,22 @@ def extract_text_from_image(image_path):
 
             if candidates and not any(has_enough_ocr_text(text) for text in texts):
                 try:
-                    with Image.open(candidates[0][0]) as candidate:
-                        retry_image = resize_for_fast_retry(candidate.convert("L"))
+                    with Image.open(image_path) as candidate:
+                        retry_image = ImageOps.autocontrast(
+                            resize_for_fast_retry(
+                                ImageOps.exif_transpose(candidate).convert("L"),
+                                max_dimension=900,
+                            )
+                        )
                         text = pytesseract.image_to_string(
                             retry_image,
                             lang="eng",
-                            config="--oem 1 --psm 6 --dpi 180",
+                            config="--oem 1 --psm 3 --dpi 180",
                             timeout=OCR_RETRY_TIMEOUT_SECONDS,
                         ).strip()
                         texts.append(text)
                         if has_enough_ocr_text(text):
-                            cache_ocr_text(image_hash, text)
+                            cache_ocr_text(image_hash, image_fingerprint, text)
                             return text
                 except (RuntimeError, pytesseract.TesseractNotFoundError, pytesseract.TesseractError) as error:
                     last_error = error
@@ -566,7 +617,7 @@ def extract_text_from_image(image_path):
                     text = run_windows_ocr(candidate_path).strip()
                     texts.append(text)
                     if has_enough_ocr_text(text):
-                        cache_ocr_text(image_hash, text)
+                        cache_ocr_text(image_hash, image_fingerprint, text)
                         return text
                 except RuntimeError as error:
                     last_error = error
@@ -575,7 +626,7 @@ def extract_text_from_image(image_path):
 
         best_text = max(texts, key=score_ocr_text, default="").strip()
         if best_text:
-            cache_ocr_text(image_hash, best_text)
+            cache_ocr_text(image_hash, image_fingerprint, best_text)
             return best_text
 
         if last_error:
