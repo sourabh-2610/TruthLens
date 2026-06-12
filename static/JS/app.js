@@ -52,8 +52,9 @@
       let swipeStartY = 0;
       let swipeTracking = false;
       let didHydrateServerRecents = false;
-      const ANALYSIS_TIMEOUT_MS = 30000;
-      const IMAGE_RESIZE_TIMEOUT_MS = 10000;
+      const ANALYSIS_TIMEOUT_MS = 90000;
+      const IMAGE_RESIZE_TIMEOUT_MS = 6000;
+      const SERVER_WAKE_NOTICE_MS = 12000;
       const HISTORY_KEY = "tl-recents";
       const MAX_RECENTS = 6;
       const SWIPE_EDGE_WIDTH = 90;
@@ -622,7 +623,7 @@
         elements.submitButton.disabled = isLoading;
       }
 
-      function resizeImageFile(file, maxSize = 1200, quality = 0.72) {
+      function resizeImageFile(file, maxSize = 1000, quality = 0.68) {
         if (!file || !file.type.startsWith("image/")) {
           return Promise.resolve(file);
         }
@@ -711,13 +712,25 @@
         renderFeedback("");
         elements.resultMount.innerHTML = "";
 
+        const hasImage = Boolean(elements.fileInput.files && elements.fileInput.files[0]);
         const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+        let timeoutId = null;
+        let wakeNoticeId = null;
 
         try {
+          const formData = await buildAnalysisFormData();
+          timeoutId = window.setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+
+          if (hasImage) {
+            setCameraStatus("Reading the image and analyzing the news...", "success");
+            wakeNoticeId = window.setTimeout(() => {
+              setCameraStatus("The server is waking up. The first analysis may take a little longer.", "success");
+            }, SERVER_WAKE_NOTICE_MS);
+          }
+
           const response = await fetch(elements.form.action, {
             method: "POST",
-            body: await buildAnalysisFormData(),
+            body: formData,
             signal: controller.signal,
             headers: {
               Accept: "application/json",
@@ -746,11 +759,19 @@
         } catch (error) {
           const message =
             error.name === "AbortError"
-              ? "Image analysis is taking too long. Please try a cropped/clearer image or paste the headline text."
+              ? "The server did not respond in time. Please try once more; the next request is usually faster."
               : error.message || "Something went wrong while analyzing. Please try again.";
           renderFeedback(message);
         } finally {
-          window.clearTimeout(timeoutId);
+          if (timeoutId) {
+            window.clearTimeout(timeoutId);
+          }
+          if (wakeNoticeId) {
+            window.clearTimeout(wakeNoticeId);
+          }
+          if (hasImage) {
+            setCameraStatus("");
+          }
           setLoadingState(false);
         }
       }
