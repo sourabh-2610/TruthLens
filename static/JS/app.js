@@ -389,7 +389,6 @@
         const resultClass = data.result_class === "real" ? "real" : "fake";
         const confidence = data.confidence == null ? "N/A" : `${escapeHtml(data.confidence)}%`;
         const confidenceLabel = escapeHtml(data.ui?.confidence_score || "Confidence Score");
-        const extractedLabel = escapeHtml(data.ui?.extracted_text_label || "Extracted Text");
         const imageTypeLabel = escapeHtml(data.ui?.image_type_label || "Input Source");
         const reasonLabel = escapeHtml(data.ui?.reason_label || "Reason");
         const imageType = data.image_type
@@ -397,14 +396,6 @@
             <div class="image-type-panel">
               <span>${imageTypeLabel}</span>
               <strong>${escapeHtml(data.image_type)}</strong>
-            </div>
-          `
-          : "";
-        const extractedText = data.extracted_text
-          ? `
-            <div class="extracted-section">
-              <p class="extracted-label">${extractedLabel}</p>
-              <p class="extracted-text">${escapeHtml(data.extracted_text)}</p>
             </div>
           `
           : "";
@@ -444,7 +435,6 @@
               </div>
 
               ${imageType}
-              ${extractedText}
               ${humanExplanation}
               ${reportAction ? `<div class="result-actions">${reportAction}</div>` : ""}
             </div>

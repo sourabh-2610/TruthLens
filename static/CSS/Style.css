@@ -929,30 +929,6 @@
       text-align: right;
     }
 
-    .extracted-section {
-      margin-top: 1.1rem;
-      padding-top: 1rem;
-      border-top: 1px solid rgba(128, 128, 128, 0.1);
-    }
-
-    .extracted-label {
-      margin-bottom: 0.5rem;
-      color: var(--muted);
-      font-size: 0.68rem;
-      font-weight: 500;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    .extracted-text {
-      max-height: 100px;
-      overflow-y: auto;
-      color: var(--muted);
-      font-size: 0.82rem;
-      font-weight: 300;
-      line-height: 1.7;
-    }
-
     .ai-explain-panel {
       margin-top: 1rem;
       padding: 0.9rem;
