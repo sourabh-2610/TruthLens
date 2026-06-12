@@ -1,15 +1,18 @@
 import os
 import pickle
 import json
+import hashlib
 import math
 import re
 import shutil
 import sqlite3
 import subprocess
+import time
 import uuid
 import urllib.parse
 import urllib.request
 import pytesseract
+from collections import OrderedDict
 from datetime import datetime
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pathlib import Path
@@ -24,8 +27,11 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
 DATABASE_PATH = Path(os.environ.get("TRUTHLENS_DB_PATH", BASE_DIR / "truthlens.db"))
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
-OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "8"))
+OCR_TIMEOUT_SECONDS = max(15, int(os.environ.get("OCR_TIMEOUT_SECONDS", "15")))
+OCR_RETRY_TIMEOUT_SECONDS = max(8, int(os.environ.get("OCR_RETRY_TIMEOUT_SECONDS", "8")))
+OCR_CACHE_SIZE = max(1, int(os.environ.get("OCR_CACHE_SIZE", "32")))
 ENABLE_SLOW_OCR_FALLBACK = os.environ.get("ENABLE_SLOW_OCR_FALLBACK") == "1"
+OCR_TEXT_CACHE = OrderedDict()
 
 # Windows-safe folder creation
 try:
@@ -399,6 +405,45 @@ def has_enough_ocr_text(text, min_words=20):
     return words >= min_words or characters >= 140
 
 
+def get_image_hash(image_path):
+    digest = hashlib.sha256()
+    with open(image_path, "rb") as image_file:
+        for chunk in iter(lambda: image_file.read(64 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def get_cached_ocr_text(image_hash):
+    text = OCR_TEXT_CACHE.get(image_hash)
+    if text is not None:
+        OCR_TEXT_CACHE.move_to_end(image_hash)
+    return text
+
+
+def cache_ocr_text(image_hash, text):
+    if not text:
+        return
+
+    OCR_TEXT_CACHE[image_hash] = text
+    OCR_TEXT_CACHE.move_to_end(image_hash)
+
+    while len(OCR_TEXT_CACHE) > OCR_CACHE_SIZE:
+        OCR_TEXT_CACHE.popitem(last=False)
+
+
+def resize_for_fast_retry(image, max_dimension=800):
+    largest = max(image.size)
+    if largest <= max_dimension:
+        return image
+
+    scale = max_dimension / largest
+    new_size = (
+        max(1, int(image.width * scale)),
+        max(1, int(image.height * scale)),
+    )
+    return image.resize(new_size, Image.Resampling.LANCZOS)
+
+
 def resize_for_ocr(image, min_dimension=1000, max_dimension=1600):
     width, height = image.size
     largest = max(width, height)
@@ -461,6 +506,13 @@ def prepare_ocr_candidates(image_path):
 
 
 def extract_text_from_image(image_path):
+    image_hash = get_image_hash(image_path)
+    cached_text = get_cached_ocr_text(image_hash)
+    if cached_text is not None:
+        app.logger.info("OCR cache hit for %s", Path(image_path).name)
+        return cached_text
+
+    started_at = time.perf_counter()
     candidates = prepare_ocr_candidates(image_path)
     texts = []
     last_error = None
@@ -484,9 +536,27 @@ def extract_text_from_image(image_path):
                         ).strip()
                         texts.append(text)
                         if has_enough_ocr_text(text):
+                            cache_ocr_text(image_hash, text)
                             return text
                 except UnidentifiedImageError:
                     raise
+                except (RuntimeError, pytesseract.TesseractNotFoundError, pytesseract.TesseractError) as error:
+                    last_error = error
+
+            if candidates and not any(has_enough_ocr_text(text) for text in texts):
+                try:
+                    with Image.open(candidates[0][0]) as candidate:
+                        retry_image = resize_for_fast_retry(candidate.convert("L"))
+                        text = pytesseract.image_to_string(
+                            retry_image,
+                            lang="eng",
+                            config="--oem 1 --psm 6 --dpi 180",
+                            timeout=OCR_RETRY_TIMEOUT_SECONDS,
+                        ).strip()
+                        texts.append(text)
+                        if has_enough_ocr_text(text):
+                            cache_ocr_text(image_hash, text)
+                            return text
                 except (RuntimeError, pytesseract.TesseractNotFoundError, pytesseract.TesseractError) as error:
                     last_error = error
 
@@ -496,6 +566,7 @@ def extract_text_from_image(image_path):
                     text = run_windows_ocr(candidate_path).strip()
                     texts.append(text)
                     if has_enough_ocr_text(text):
+                        cache_ocr_text(image_hash, text)
                         return text
                 except RuntimeError as error:
                     last_error = error
@@ -504,6 +575,7 @@ def extract_text_from_image(image_path):
 
         best_text = max(texts, key=score_ocr_text, default="").strip()
         if best_text:
+            cache_ocr_text(image_hash, best_text)
             return best_text
 
         if last_error:
@@ -511,6 +583,11 @@ def extract_text_from_image(image_path):
 
         return ""
     finally:
+        app.logger.info(
+            "OCR processing finished for %s in %.2f seconds",
+            Path(image_path).name,
+            time.perf_counter() - started_at,
+        )
         for candidate_path, cleanup in candidates:
             if cleanup and candidate_path.exists():
                 candidate_path.unlink(missing_ok=True)
