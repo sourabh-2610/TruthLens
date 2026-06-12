@@ -425,13 +425,13 @@
   </div>
   {% endif %}
 
-  <script>
-    window.TRUTHLENS_CONFIG = {
-      isAuthenticated: {{ 'true' if current_user else 'false' }},
-      historyEnabled: {{ 'true' if current_user else 'false' }},
-      serverRecents: {{ saved_recents|tojson }}
-    };
-  </script>
+  <div
+    id="truthlensConfig"
+    data-is-authenticated="{{ 'true' if current_user else 'false' }}"
+    data-history-enabled="{{ 'true' if current_user else 'false' }}"
+    data-server-recents="{{ saved_recents|tojson|forceescape }}"
+    hidden
+  ></div>
   <script src="{{ url_for('static', filename='JS/app.js') }}"></script>
 </body>
 </html>

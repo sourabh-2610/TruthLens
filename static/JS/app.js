@@ -35,10 +35,17 @@
         guestForms: Array.from(document.querySelectorAll("[data-guest-form]")),
       };
 
-      const config = window.TRUTHLENS_CONFIG || {};
-      const IS_AUTHENTICATED = Boolean(config.isAuthenticated);
-      const HISTORY_ENABLED = Boolean(config.historyEnabled);
-      const SERVER_RECENTS = Array.isArray(config.serverRecents) ? config.serverRecents : [];
+      const configElement = document.getElementById("truthlensConfig");
+      const IS_AUTHENTICATED = configElement?.dataset.isAuthenticated === "true";
+      const HISTORY_ENABLED = configElement?.dataset.historyEnabled === "true";
+      let SERVER_RECENTS = [];
+
+      try {
+        const savedRecents = JSON.parse(configElement?.dataset.serverRecents || "[]");
+        SERVER_RECENTS = Array.isArray(savedRecents) ? savedRecents : [];
+      } catch (error) {
+        console.warn("Could not read saved analyses.", error);
+      }
       let cameraStream = null;
       let activeRecentId = null;
       let swipeStartX = 0;
