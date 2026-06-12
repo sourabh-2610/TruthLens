@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TruthLens - AI Fake News Detector</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Inter:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap"
+    rel="stylesheet"
+  />
+
+  <link
+    rel="stylesheet"
+    href="{{ url_for('static', filename='CSS/Style.css') }}"
+  />
+</head>
+
+<body class="{% if show_auth_gate %}auth-only{% endif %}">
+  <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu" onclick="toggleSidebar()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 6h16"></path>
+      <path d="M4 12h16"></path>
+      <path d="M4 18h16"></path>
+    </svg>
+  </button>
+
+  <aside class="history-panel" aria-label="Recent analyses">
+    <div class="history-top">
+      <div class="auth-panel">
+        {% if current_user %}
+        <span class="auth-kicker">Signed in</span>
+        <span class="auth-user">{{ current_user.name }}</span>
+        <a class="dashboard-link" href="{{ url_for('dashboard') }}">Personal Dashboard</a>
+        <form action="{{ url_for('logout') }}" method="POST">
+          <button type="submit" class="auth-chip">Log out</button>
+        </form>
+        {% elif is_guest %}
+        <span class="auth-kicker">Guest mode</span>
+        <div class="auth-actions">
+          <button type="button" class="auth-chip" onclick="openAuthModal('login')">Login</button>
+          <button type="button" class="auth-chip" onclick="openAuthModal('signup')">Sign Up</button>
+        </div>
+        {% else %}
+        <span class="auth-kicker">Welcome</span>
+        <div class="auth-actions">
+          <button type="button" class="auth-chip primary" onclick="openAuthModal('login')">Login</button>
+          <button type="button" class="auth-chip" onclick="openAuthModal('signup')">Sign Up</button>
+        </div>
+        {% endif %}
+      </div>
+
+      <button type="button" class="new-chat-btn" onclick="startNewChat()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        New Chat
+      </button>
+      {% if current_user %}
+      <p class="history-label">Recents</p>
+      <div class="recents-list" id="recentsList"></div>
+      {% endif %}
+    </div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"></circle>
+          <path d="m20 20-4.2-4.2"></path>
+        </svg>
+      </div>
+      <span class="brand-name">Truth<span>Lens</span></span>
+    </div>
+
+    <div class="header-right">
+      <button class="theme-toggle" type="button" onclick="toggleTheme()" title="Toggle dark/light" aria-label="Toggle dark or light theme">
+        <div class="toggle-track">
+          <div class="toggle-knob"></div>
+        </div>
+      </button>
+      <span class="version-pill">AI</span>
+    </div>
+  </header>
+
+  {% if show_auth_gate %}
+  <main>
+    <section class="auth-gate" aria-label="Account access">
+      <div class="auth-gate-copy">
+        <p class="hero-eyebrow">TruthLens AI</p>
+        <h1>Analyze news with <span>saved proof</span></h1>
+        <p>Login to keep your analysis history, download reports, and view your dashboard. Guests can analyze without saved history.</p>
+        <div class="auth-benefits">
+          <span>Saved History</span>
+          <span>Download Report</span>
+          <span>Personal Dashboard</span>
+        </div>
+      </div>
+
+      <div class="auth-gate-card">
+        <div class="auth-tabs" aria-label="Account options">
+          <button type="button" id="gateLoginTab" class="active" data-auth-tab="login" onclick="switchAuthMode('login')">Login</button>
+          <button type="button" id="gateSignupTab" data-auth-tab="signup" onclick="switchAuthMode('signup')">Sign Up</button>
+        </div>
+
+        {% if google_enabled %}
+        <a class="google-btn" href="{{ url_for('google_login') }}">
+          <span class="google-mark" aria-hidden="true">G</span>
+          Continue with Google
+        </a>
+        {% else %}
+        <div class="google-btn is-disabled" aria-disabled="true">
+          <span class="google-mark" aria-hidden="true">G</span>
+          Google setup required
+        </div>
+        {% endif %}
+
+        <form class="auth-form active" id="gateLoginForm" action="{{ url_for('login') }}" method="POST" data-auth-form data-auth-mode="login">
+          <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+          <input type="password" name="password" placeholder="Password" autocomplete="current-password" required />
+          <button type="submit">Login</button>
+        </form>
+
+        <form class="auth-form" id="gateSignupForm" action="{{ url_for('signup') }}" method="POST" data-auth-form data-auth-mode="signup">
+          <input type="text" name="name" placeholder="Name" autocomplete="name" required />
+          <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+          <input type="password" name="password" placeholder="Password" autocomplete="new-password" minlength="6" required />
+          <button type="submit">Create Account</button>
+        </form>
+
+        <form class="guest-form" action="{{ url_for('continue_guest') }}" method="POST" data-guest-form>
+          <button type="submit" class="guest-btn">Continue as Guest</button>
+        </form>
+
+        <div class="auth-message" id="gateAuthMessage" data-auth-message>{% if error %}{{ error }}{% endif %}</div>
+      </div>
+    </section>
+  </main>
+  {% elif show_dashboard %}
+  <main>
+    <section class="dashboard-view" aria-label="Personal dashboard">
+      <div class="dashboard-head">
+        <div>
+          <p class="hero-eyebrow">Saved History</p>
+          <h2>Personal Dashboard</h2>
+        </div>
+        <a class="report-btn" href="{{ url_for('home') }}">New Analysis</a>
+      </div>
+
+      <div class="dashboard-stats">
+        <div class="stat-card">
+          <span>Total</span>
+          <strong>{{ dashboard_stats.total if dashboard_stats else 0 }}</strong>
+        </div>
+        <div class="stat-card">
+          <span>Real</span>
+          <strong>{{ dashboard_stats.real if dashboard_stats else 0 }}</strong>
+        </div>
+        <div class="stat-card">
+          <span>Fake</span>
+          <strong>{{ dashboard_stats.fake if dashboard_stats else 0 }}</strong>
+        </div>
+      </div>
+
+      <div class="dashboard-list">
+        {% if dashboard_items %}
+          {% for item in dashboard_items %}
+          <article class="dashboard-item">
+            <div class="dashboard-item-top">
+              <div>
+                <div class="dashboard-title">{{ item.title }}</div>
+                <div class="dashboard-meta">{{ item.createdAt }} &middot; {{ item.data.display_prediction }}</div>
+              </div>
+              <a class="report-btn secondary" href="{{ item.data.report_url }}">Download Report</a>
+            </div>
+            <p class="dashboard-meta">{{ item.data.reason }}</p>
+          </article>
+          {% endfor %}
+        {% else %}
+          <div class="dashboard-empty">No saved analyses yet. Run an analysis while logged in to build your history.</div>
+        {% endif %}
+      </div>
+    </section>
+  </main>
+  {% else %}
+  <main>
+    <section class="hero" aria-labelledby="heroTitle">
+      <p class="hero-eyebrow">Multimodal Fact Checker</p>
+      <h1 id="heroTitle">Detect <span class="accent">fake news</span><br />in seconds</h1>
+      <p>Paste an article or upload an image.<br />Our ML model gives an instant verdict.</p>
+    </section>
+
+    <section class="card" aria-label="News analysis form">
+      <form id="mainForm" action="/predict" method="POST" enctype="multipart/form-data">
+        <div class="card-body">
+          <p class="section-label">News Headlines</p>
+
+          <textarea
+            name="news"
+            id="newsText"
+            placeholder="Paste a news article or headline here..."
+            oninput="updateCount(this)"
+          ></textarea>
+          <div class="char-count" id="charCount"></div>
+
+          <div class="divider">OR</div>
+
+          <div class="upload-zone" id="uploadZone">
+            <input type="file" id="fileInput" name="image" accept="image/*" onchange="showFileName(this)" />
+
+            <div class="upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v12"></path>
+                <path d="m7 8 5-5 5 5"></path>
+                <path d="M5 15v4h14v-4"></path>
+              </svg>
+            </div>
+
+            <div class="upload-text">
+              <strong>Upload Image</strong>
+              <span>max 10 MB</span>
+            </div>
+
+            <span class="upload-badge">Optional</span>
+          </div>
+          <div class="file-name" id="fileName"></div>
+
+          <div class="camera-tools">
+            <button type="button" class="camera-btn primary" onclick="startCamera()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14.5 4h-5L7.8 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.8z"></path>
+                <circle cx="12" cy="12.5" r="3.5"></circle>
+              </svg>
+              Open Camera
+            </button>
+
+            <button type="button" class="camera-btn" id="captureBtn" onclick="capturePhoto()" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.5"></circle>
+                <path d="M3 12h3"></path>
+                <path d="M18 12h3"></path>
+                <path d="M12 3v3"></path>
+                <path d="M12 18v3"></path>
+              </svg>
+              Capture
+            </button>
+
+            <button type="button" class="camera-btn" id="stopCameraBtn" onclick="stopCamera()" disabled>
+              Stop
+            </button>
+          </div>
+
+          <div class="camera-panel" id="cameraPanel">
+            <video id="cameraStream" autoplay playsinline muted></video>
+            <canvas id="cameraCanvas"></canvas>
+          </div>
+          <div class="camera-status" id="cameraStatus"></div>
+
+          <div class="language-row">
+            <label for="languageSelect">Result Language</label>
+            <select name="language" id="languageSelect">
+              <option value="en" {% if selected_language != 'hi' %}selected{% endif %}>English</option>
+              <option value="hi" {% if selected_language == 'hi' %}selected{% endif %}>Hindi</option>
+            </select>
+          </div>
+
+          <div class="img-preview" id="imgPreview">
+            <img id="previewImg" src="" alt="Preview" />
+          </div>
+
+          <div id="feedbackMount">
+            {% if error %}
+            <div class="error-box">Warning: {{ error }}</div>
+            {% endif %}
+          </div>
+
+          <div id="serverPreviewMount">
+            {% if uploaded_image %}
+            <div class="img-preview show server-preview">
+              <img src="{{ url_for('static', filename=uploaded_image) }}" alt="Uploaded image" onclick="openImageViewer(this.src)" />
+            </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <button type="submit" id="submitBtn">
+            <span class="btn-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+              </svg>
+              Analyze News
+            </span>
+            <span class="spinner"></span>
+          </button>
+
+          <button type="button" class="btn-clear" onclick="clearAll()">Clear</button>
+        </div>
+      </form>
+    </section>
+
+    <div id="resultMount">
+      {% if prediction and show_result %}
+      <section class="result-wrap" aria-label="Analysis result">
+        <div class="result-card {{ result_class }}">
+          <div class="result-header">
+            <div class="result-icon">{% if result_class == 'real' %}&check;{% else %}&times;{% endif %}</div>
+            <div>
+              <div class="result-verdict">{{ display_prediction or prediction }}</div>
+              <div class="result-desc">
+                <span class="reason-label">{{ ui.reason_label }}</span>
+                {{ reason }}
+              </div>
+            </div>
+          </div>
+
+          <div class="conf-row">
+            <span class="conf-label">{{ ui.confidence_score }}</span>
+            <span class="conf-value" id="confVal">{% if confidence is not none %}{{ confidence }}%{% else %}N/A{% endif %}</span>
+          </div>
+
+          <div class="conf-track">
+            <div class="conf-fill" id="confFill"></div>
+          </div>
+
+          {% if image_type %}
+          <div class="image-type-panel">
+            <span>{{ ui.image_type_label }}</span>
+            <strong>{{ image_type }}</strong>
+          </div>
+          {% endif %}
+
+          {% if extracted_text %}
+          <div class="extracted-section">
+            <p class="extracted-label">{{ ui.extracted_text_label }}</p>
+            <p class="extracted-text">{{ extracted_text }}</p>
+          </div>
+          {% endif %}
+
+          {% if human_explanation %}
+          <div class="ai-explain-panel">
+            <span>AI Explanation</span>
+            <p>{{ human_explanation }}</p>
+          </div>
+          {% endif %}
+
+          {% if report_url %}
+          <div class="result-actions">
+            <a class="report-btn" href="{{ report_url }}">Download Report</a>
+          </div>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+    </div>
+
+    <section class="examples" aria-label="Example headlines">
+      <p class="examples-label">Try an example</p>
+      <div class="chips">
+        <span class="chip" onclick="setExample(this)">Scientists discover water on Mars surface</span>
+        <span class="chip" onclick="setExample(this)">Government secretly controls the weather</span>
+        <span class="chip" onclick="setExample(this)">WHO approves new vaccine for clinical trials</span>
+        <span class="chip" onclick="setExample(this)">5G towers spread coronavirus, experts warn</span>
+        <span class="chip" onclick="setExample(this)">Stock market hits all-time high this quarter</span>
+      </div>
+    </section>
+  </main>
+  {% endif %}
+
+  <footer>
+    TruthLens AI &nbsp;&middot;&nbsp; For research and educational use only &nbsp;&middot;&nbsp; Always verify with trusted sources
+  </footer>
+
+  <div class="image-viewer" id="imageViewer" role="dialog" aria-modal="true" aria-label="Uploaded image preview" onclick="closeImageViewer()">
+    <button type="button" class="image-viewer-close" aria-label="Close image preview" onclick="closeImageViewer()">&times;</button>
+    <img id="imageViewerImg" src="" alt="Uploaded image full preview" onclick="event.stopPropagation()" />
+  </div>
+
+  {% if not current_user %}
+  <div class="auth-modal" id="authModal" role="dialog" aria-modal="true" aria-label="Account access" onclick="closeAuthModal()">
+    <div class="auth-card" onclick="event.stopPropagation()">
+      <div class="auth-card-head">
+        <h2 id="authTitle">Login</h2>
+        <button type="button" class="auth-close" aria-label="Close login dialog" onclick="closeAuthModal()">&times;</button>
+      </div>
+
+      <div class="auth-tabs" aria-label="Account options">
+        <button type="button" id="loginTab" class="active" data-auth-tab="login" onclick="switchAuthMode('login')">Login</button>
+        <button type="button" id="signupTab" data-auth-tab="signup" onclick="switchAuthMode('signup')">Sign Up</button>
+      </div>
+
+      {% if google_enabled %}
+      <a class="google-btn" href="{{ url_for('google_login') }}">
+        <span class="google-mark" aria-hidden="true">G</span>
+        Continue with Google
+      </a>
+      {% else %}
+      <div class="google-btn is-disabled" aria-disabled="true">
+        <span class="google-mark" aria-hidden="true">G</span>
+        Google setup required
+      </div>
+      {% endif %}
+
+      <form class="auth-form active" id="loginForm" action="{{ url_for('login') }}" method="POST" data-auth-form data-auth-mode="login">
+        <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required />
+        <button type="submit">Login</button>
+      </form>
+
+      <form class="auth-form" id="signupForm" action="{{ url_for('signup') }}" method="POST" data-auth-form data-auth-mode="signup">
+        <input type="text" name="name" placeholder="Name" autocomplete="name" required />
+        <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+        <input type="password" name="password" placeholder="Password" autocomplete="new-password" minlength="6" required />
+        <button type="submit">Create Account</button>
+      </form>
+
+      <div class="auth-message" id="authMessage" data-auth-message>{% if error %}{{ error }}{% endif %}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <script>
+    window.TRUTHLENS_CONFIG = {
+      isAuthenticated: {{ 'true' if current_user else 'false' }},
+      historyEnabled: {{ 'true' if current_user else 'false' }},
+      serverRecents: {{ saved_recents|tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='JS/app.js') }}"></script>
+</body>
+</html>

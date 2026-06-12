@@ -578,7 +578,7 @@ def build_template_context(**context):
 
 def render_index(**context):
     defaults = build_template_context(**context)
-    return render_template("index2.html", **defaults)
+    return render_template("index.html", **defaults)
 
 
 def wants_json_response():
