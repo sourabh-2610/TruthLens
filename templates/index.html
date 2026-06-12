@@ -14,7 +14,7 @@
 
   <link
     rel="stylesheet"
-    href="{{ url_for('static', filename='CSS/Style.css') }}"
+    href="{{ url_for('static', filename='CSS/Style.css', v='20260612-2') }}"
   />
 </head>
 
@@ -425,6 +425,6 @@
     data-server-recents="{{ saved_recents|tojson|forceescape }}"
     hidden
   ></div>
-  <script src="{{ url_for('static', filename='JS/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='JS/app.js', v='20260612-2') }}"></script>
 </body>
 </html>

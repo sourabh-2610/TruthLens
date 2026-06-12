@@ -114,7 +114,6 @@ UI_TEXT = {
         "confidence_score": "Confidence Score",
         "reason_label": "Reason",
         "image_type_label": "Detected Image Type",
-        "extracted_text_label": "Extracted Text from Image",
         "invalid_image": "Please upload a valid image file.",
         "file_too_large": "Image is too large. Please upload an image under 10 MB.",
         "ocr_failed": "OCR could not read this image. Please try a clearer image or paste the news text manually.",
@@ -127,7 +126,6 @@ UI_TEXT = {
         "confidence_score": "विश्वास स्कोर",
         "reason_label": "कारण",
         "image_type_label": "पहचाना गया इमेज प्रकार",
-        "extracted_text_label": "इमेज से निकाला गया टेक्स्ट",
         "invalid_image": "कृपया सही इमेज फाइल अपलोड करें।",
         "ocr_failed": "OCR इस इमेज को पढ़ नहीं पाया। कृपया साफ इमेज अपलोड करें या खबर का टेक्स्ट खुद लिखें।",
         "missing_input": "कृपया विश्लेषण से पहले खबर का टेक्स्ट डालें या पढ़ने योग्य टेक्स्ट वाली इमेज अपलोड करें।",
@@ -207,7 +205,6 @@ def serialize_analysis_row(row):
             "confidence_score": ui["confidence_score"],
             "reason_label": ui["reason_label"],
             "image_type_label": ui["image_type_label"],
-            "extracted_text_label": ui["extracted_text_label"],
         },
     }
 
@@ -740,7 +737,6 @@ def build_json_response(**context):
             "confidence_score": data["ui"]["confidence_score"],
             "reason_label": data["ui"]["reason_label"],
             "image_type_label": data["ui"]["image_type_label"],
-            "extracted_text_label": data["ui"]["extracted_text_label"],
         },
     })
 
